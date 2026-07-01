@@ -1,0 +1,88 @@
+services:
+  mongo1:
+    image: mongo:7
+    container_name: sensei-mongo-1
+    command: mongod --replSet sensei-rs --bind_ip_all --port 27017 --wiredTigerCacheSizeGB 0.5
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo1-data:/data/db
+    networks:
+      - sensei-net
+    healthcheck:
+      test: mongosh --port 27017 --eval "db.adminCommand('ping')" --quiet
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mongo2:
+    image: mongo:7
+    container_name: sensei-mongo-2
+    command: mongod --replSet sensei-rs --bind_ip_all --port 27017 --wiredTigerCacheSizeGB 0.5
+    ports:
+      - "27018:27017"
+    volumes:
+      - mongo2-data:/data/db
+    networks:
+      - sensei-net
+    healthcheck:
+      test: mongosh --port 27017 --eval "db.adminCommand('ping')" --quiet
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mongo3:
+    image: mongo:7
+    container_name: sensei-mongo-3
+    command: mongod --replSet sensei-rs --bind_ip_all --port 27017 --wiredTigerCacheSizeGB 0.5
+    ports:
+      - "27019:27017"
+    volumes:
+      - mongo3-data:/data/db
+    networks:
+      - sensei-net
+    healthcheck:
+      test: mongosh --port 27017 --eval "db.adminCommand('ping')" --quiet
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mongo-init:
+    image: mongo:7
+    container_name: sensei-mongo-init
+    depends_on:
+      mongo1:
+        condition: service_healthy
+      mongo2:
+        condition: service_healthy
+      mongo3:
+        condition: service_healthy
+    networks:
+      - sensei-net
+    restart: "no"
+    entrypoint: >
+      mongosh --host sensei-mongo-1:27017 --eval "
+        try {
+          rs.status();
+          print('replica set already initialized');
+        } catch(e) {
+          rs.initiate({
+            _id: 'sensei-rs',
+            members: [
+              { _id: 0, host: 'sensei-mongo-1:27017' },
+              { _id: 1, host: 'sensei-mongo-2:27017' },
+              { _id: 2, host: 'sensei-mongo-3:27017' }
+            ]
+          });
+          print('replica set initialized');
+        }
+      "
+
+volumes:
+  mongo1-data:
+  mongo2-data:
+  mongo3-data:
+
+networks:
+  sensei-net:
+    driver: bridge

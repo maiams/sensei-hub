@@ -1,0 +1,36 @@
+{
+  "name": "@sensei-hub/app",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/main.js",
+  "scripts": {
+    "dev": "electron .",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "package": "electron-builder",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "electron-updater": "^6.6.2"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.10",
+    "electron": "^36.4.0",
+    "electron-builder": "^25.1.8",
+    "typescript": "^5.8.3"
+  },
+  "build": {
+    "appId": "com.senseihub.app",
+    "productName": "Sensei Hub",
+    "extraResources": [
+      {
+        "from": "../../resources/mongodb/${os}",
+        "to": "mongodb",
+        "filter": ["**/*"]
+      }
+    ],
+    "win": { "target": "nsis" },
+    "mac": { "target": "dmg" },
+    "linux": { "target": "AppImage" }
+  }
+}
