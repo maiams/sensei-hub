@@ -1,7 +1,7 @@
 # Sensei Hub — Status de Implementação e Plano de Desenvolvimento
 
 **Gerado em:** 2026-07-01
-**Atualizado em:** 2026-07-13
+**Atualizado em:** 2026-07-13 (Fase 2 — backend concluído)
 **Propósito:** Documento de referência técnica. Descreve o que foi implementado, as decisões tomadas, e o plano detalhado para as fases seguintes. É a fonte de verdade para quem for implementar as próximas fases — leia a seção 6 (Convenções) antes de escrever código.
 
 ---
@@ -115,6 +115,30 @@ sensei-hub/
 - [x] Testes do `authorize` middleware isolado (`__tests__/authorize.test.ts`: sem `authUser` → 401, role insuficiente → 403, role igual/superior → passa)
 - [x] Commit da Fase 1
 
+### Fase 2 — Backend concluído em 2026-07-13 (UI ainda pendente)
+
+**Implementado:**
+- `AgeClassService` (puro, sem I/O): `calculateAgeClass`, `getWeightCategories`, `assignWeightCategory` — 33 testes cobrindo limites exatos de idade e categorias de peso
+- Models: `AthleteModel` (CPF único parcial por academia, `medical` subdocumento com `select:false`), `GuardianModel` (1 por atleta no MVP), `BeltRecordModel`, `WeightRecordModel`; `AcademyModel` ganhou `athleteSeq` para gerar `enrollmentNumber` atomicamente
+- `AthleteService`: create (guardian atômico via `mongoose.session.withTransaction` quando menor), get (filtra dados médicos por role), list (paginado + busca), update (audit log por campo), deactivate (soft delete), belt records, guardian CRUD
+- `WeightService`: `recordWeight`, `correctWeight` (append-only, nunca altera original)
+- Rotas `/api/athletes/*` completas conforme especificado abaixo, registradas em `app.ts`
+- `isValidCPF` (dígitos verificadores) adicionado em `packages/shared/src/domain/cpf.ts`
+- Helper de teste `db.ts` migrado para `MongoMemoryReplSet` (era `MongoMemoryServer` standalone) — necessário porque `AthleteService.createAthlete` usa transação, que exige replica set
+- 74 testes passando no total (server), typecheck limpo em todos os pacotes
+
+**Decisões tomadas nesta fase (divergências/adições ao plano original):**
+
+1. **Classe etária "sênior" fixada em 21–29 anos para `calculateAgeClass`.** O comentário original no schema Zod dizia "15+ (open adult)", que se sobrepõe a todas as outras classes por design em torneios reais (um atleta pode competir em mais de uma classe). Como a função deriva **uma única classe por idade**, foi necessário particionar estritamente: sênior preenche a lacuna entre júnior (termina em 20) e veterano J1 (começa em 30). Revisitar se uma federação específica usar regra diferente.
+2. **Tabela de categorias de peso populada apenas para classes adultas (júnior, sênior, veteranos) — vazia/erro para classes de base (pré-mirim a juvenil).** Categorias de peso infanto-juvenis variam por federação estadual e por temporada; não há fonte confiável para fabricar esses números com segurança em uma plataforma que vai operar torneios reais envolvendo crianças. `getWeightCategories`/`assignWeightCategory` lançam `AgeClassServiceError` para essas classes até que a tabela oficial seja fornecida (possivelmente configurável por evento/divisão na Fase 3A). **Ação necessária do usuário:** fornecer a tabela oficial (CBJ ou federação estadual) antes de rodar um evento de base.
+3. **`enrollmentNumber` gerado via contador atômico em `AcademyModel.athleteSeq`** (`findByIdAndUpdate($inc)`), não via UUID — mais legível para operação de balcão, e atômico mesmo sob concorrência.
+4. **Guardian é 1:1 com atleta no MVP** (índice único em `athleteId`). `POST /guardian` retorna 409 se já existe um; não há endpoint de atualização de guardian nesta fase — cobrir depois se necessário.
+5. **Helper de teste passou a subir um replica-set de 1 nó** (`MongoMemoryReplSet`) em vez de standalone, para suportar `session.withTransaction()` usado na criação atômica de atleta+guardian. Mais fiel à topologia de produção.
+
+**Pendente da Fase 2:**
+- [ ] UI mínima (lista de atletas com busca, formulário de cadastro/edição com seção condicional de responsável, perfil com histórico de faixa/peso)
+- [ ] Tabela de categorias de peso para classes de base (bloqueado em fonte de dados oficial — ver decisão 2 acima)
+
 ---
 
 ## 5. Roadmap de Fases
@@ -124,7 +148,7 @@ sensei-hub/
 | 0 | Monorepo, shared types, server stub, Electron, Docker RS | Concluída |
 | 0.5 | Bugs supervisor, discriminated union bracket, DTOs | Concluída |
 | 1 | Auth + RBAC + first-run setup | Concluída |
-| 2 | Atleta CRUD + Guardian + Belt/Weight records | **Próxima** |
+| 2 | Atleta CRUD + Guardian + Belt/Weight records | Backend concluído; UI pendente |
 | 3A | Evento + Divisões + Inscrições | — |
 | 3B | Bracket engine puro + testes | — |
 | 3C | Persistência de bracket + match results | — |

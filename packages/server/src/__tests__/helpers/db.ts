@@ -1,10 +1,12 @@
-import { MongoMemoryServer } from 'mongodb-memory-server'
+import { MongoMemoryReplSet } from 'mongodb-memory-server'
 import mongoose from 'mongoose'
 
-let mongod: MongoMemoryServer
+let mongod: MongoMemoryReplSet
 
+// Single-node replica set — mirrors production topology and is required for
+// Mongoose sessions/transactions (e.g. AthleteService's atomic guardian create).
 export async function connectTestDb(): Promise<void> {
-  mongod = await MongoMemoryServer.create()
+  mongod = await MongoMemoryReplSet.create({ replSet: { count: 1, storageEngine: 'wiredTiger' } })
   await mongoose.connect(mongod.getUri(), { dbName: 'senseihub-test' })
 }
 

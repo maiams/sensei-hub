@@ -46,15 +46,49 @@ const AthleteWritableFields = {
   currentBelt: Belt,
   federationNumber: z.string().optional(),
   hasMedicalRestriction: z.boolean().default(false),
+  medicalNotes: z.string().max(2000).optional(),   // select: false at the model level; coach+ only
+  allergies: z.string().max(1000).optional(),      // select: false at the model level; coach+ only
   termsAccepted: z.boolean().default(false),
   imageAuthorizationAccepted: z.boolean().default(false),
 }
+
+const GuardianRelationship = z.enum(['father', 'mother', 'guardian', 'other'])
+export type GuardianRelationship = z.infer<typeof GuardianRelationship>
+
+// Embedded in POST /api/athletes when the athlete is a minor
+export const CreateGuardianInput = z.object({
+  name: z.string().min(2).max(120),
+  relationship: GuardianRelationship,
+  phone: z.string().min(8),
+  email: z.string().email().optional(),
+  cpf: z.string().optional(),
+  termsAccepted: z.literal(true),
+  imageAuthorizationAccepted: z.boolean().default(false),
+})
+export type CreateGuardianInput = z.infer<typeof CreateGuardianInput>
+
+export const GuardianDTO = z.object({
+  _id: z.string(),
+  athleteId: z.string(),
+  name: z.string(),
+  relationship: GuardianRelationship,
+  phone: z.string(),
+  email: z.string().email().optional(),
+  cpf: z.string().optional(),
+  userId: z.string().optional(),
+  termsAccepted: z.boolean(),
+  imageAuthorizationAccepted: z.boolean(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+})
+export type GuardianDTO = z.infer<typeof GuardianDTO>
 
 // POST /api/athletes
 export const CreateAthleteInput = z.object({
   academyId: z.string(),
   scope: AthleteScope.default('academy'),
   eventOnlyEventId: z.string().optional(),
+  guardian: CreateGuardianInput.optional(),   // required by the service when the athlete is a minor
   ...AthleteWritableFields,
 })
 export type CreateAthleteInput = z.infer<typeof CreateAthleteInput>
@@ -82,6 +116,8 @@ export const AthleteDTO = z.object({
   federationNumber: z.string().optional(),
   latestWeightKg: z.number().positive().optional(),
   hasMedicalRestriction: z.boolean(),    // flag visible to staff; notes are role-restricted server-side
+  medicalNotes: z.string().optional(),   // only present in the response for coach+ roles
+  allergies: z.string().optional(),      // only present in the response for coach+ roles
   termsAccepted: z.boolean(),
   imageAuthorizationAccepted: z.boolean(),
   createdAt: z.string().datetime(),
@@ -98,3 +134,56 @@ export type AthleteDocument = z.infer<typeof AthleteDocumentSchema>
 // Kept for backward compat with existing imports
 export const AthleteSchema = AthleteDocumentSchema
 export type Athlete = AthleteDocument
+
+// ─── Belt records ────────────────────────────────────────────────────────────
+
+// POST /api/athletes/:id/belts
+export const CreateBeltRecordInput = z.object({
+  belt: Belt,
+  grantedAt: z.string().date(),
+  notes: z.string().max(500).optional(),
+})
+export type CreateBeltRecordInput = z.infer<typeof CreateBeltRecordInput>
+
+export const BeltRecordDTO = z.object({
+  _id: z.string(),
+  athleteId: z.string(),
+  belt: Belt,
+  grantedAt: z.string().date(),
+  grantedBy: z.string(),
+  notes: z.string().optional(),
+  createdAt: z.string().datetime(),
+})
+export type BeltRecordDTO = z.infer<typeof BeltRecordDTO>
+
+// ─── Weight records ──────────────────────────────────────────────────────────
+
+export const WeightSource = z.enum(['manual', 'scale', 'import', 'corrected'])
+export type WeightSource = z.infer<typeof WeightSource>
+
+// POST /api/athletes/:id/weights
+export const RecordWeightInput = z.object({
+  weightKg: z.number().positive().max(300),
+  eventId: z.string().optional(),
+})
+export type RecordWeightInput = z.infer<typeof RecordWeightInput>
+
+// POST /api/athletes/:id/weights/:wid/correct
+export const CorrectWeightInput = z.object({
+  weightKg: z.number().positive().max(300),
+  reason: z.string().min(3).max(500),
+})
+export type CorrectWeightInput = z.infer<typeof CorrectWeightInput>
+
+export const WeightRecordDTO = z.object({
+  _id: z.string(),
+  athleteId: z.string(),
+  eventId: z.string().optional(),
+  weightKg: z.number().positive(),
+  source: WeightSource,
+  operatorId: z.string(),
+  recordedAt: z.string().datetime(),
+  correctionReason: z.string().optional(),
+  originalRecordId: z.string().optional(),
+})
+export type WeightRecordDTO = z.infer<typeof WeightRecordDTO>

@@ -1,4 +1,5 @@
 export * from './domain/athlete.js'
+export * from './domain/cpf.js'
 export * from './domain/bracket.js'
 export * from './domain/event.js'
 export * from './domain/scoreboard.js'
