@@ -10,20 +10,30 @@ interface Row {
 }
 
 interface WeightCategoryGridProps {
-  groupKey: string
-  gender: 'male' | 'female'
+  templateKey: string
+  groupId: string
+  initialLabel: string
   initialCategories: Array<{ label: string; maxKg: number | null }>
-  initialIsDefault: boolean
+  canRestoreFromPreset: boolean
   canEdit: boolean
+  onDeleted: () => void
 }
 
 function toRows(categories: Array<{ label: string; maxKg: number | null }>): Row[] {
   return categories.map((c) => ({ label: c.label, maxKg: c.maxKg === null ? '' : String(c.maxKg) }))
 }
 
-export function WeightCategoryGrid({ groupKey, gender, initialCategories, initialIsDefault, canEdit }: WeightCategoryGridProps) {
+export function WeightCategoryGrid({
+  templateKey,
+  groupId,
+  initialLabel,
+  initialCategories,
+  canRestoreFromPreset,
+  canEdit,
+  onDeleted,
+}: WeightCategoryGridProps) {
+  const [label, setLabel] = useState(initialLabel)
   const [rows, setRows] = useState<Row[]>(toRows(initialCategories))
-  const [isDefault, setIsDefault] = useState(initialIsDefault)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -47,12 +57,12 @@ export function WeightCategoryGrid({ groupKey, gender, initialCategories, initia
         label: r.label.trim(),
         maxKg: r.maxKg.trim() === '' ? null : Number(r.maxKg),
       }))
-      const result = await apiFetch<{ categories: Array<{ label: string; maxKg: number | null }>; isDefault: boolean }>(
-        `/weight-categories/${groupKey}/${gender}`,
-        { method: 'PUT', body: JSON.stringify({ categories }) },
+      const result = await apiFetch<{ label: string; categories: Array<{ label: string; maxKg: number | null }> }>(
+        `/division-templates/${templateKey}/groups/${groupId}`,
+        { method: 'PATCH', body: JSON.stringify({ label, categories }) },
       )
+      setLabel(result.label)
       setRows(toRows(result.categories))
-      setIsDefault(result.isDefault)
     } catch (err) {
       setError(err instanceof ApiError ? translateApiError(err.message) : 'Não foi possível salvar.')
     } finally {
@@ -60,35 +70,51 @@ export function WeightCategoryGrid({ groupKey, gender, initialCategories, initia
     }
   }
 
-  async function handleReset() {
+  async function handleRestore() {
     setLoading(true)
     setError(null)
     try {
-      const result = await apiFetch<{ categories: Array<{ label: string; maxKg: number | null }>; isDefault: boolean }>(
-        `/weight-categories/${groupKey}/${gender}`,
-        { method: 'DELETE' },
+      const result = await apiFetch<{ categories: Array<{ label: string; maxKg: number | null }> }>(
+        `/division-templates/${templateKey}/groups/${groupId}/restore`,
+        { method: 'POST' },
       )
       setRows(toRows(result.categories))
-      setIsDefault(result.isDefault)
     } catch (err) {
-      setError(err instanceof ApiError ? translateApiError(err.message) : 'Não foi possível restaurar o padrão.')
+      setError(err instanceof ApiError ? translateApiError(err.message) : 'Não foi possível restaurar.')
     } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleDelete() {
+    if (!window.confirm(`Apagar o grupo "${label}"?`)) return
+    setLoading(true)
+    setError(null)
+    try {
+      await apiFetch(`/division-templates/${templateKey}/groups/${groupId}`, { method: 'DELETE' })
+      onDeleted()
+    } catch (err) {
+      setError(err instanceof ApiError ? translateApiError(err.message) : 'Não foi possível apagar o grupo.')
       setLoading(false)
     }
   }
 
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900 p-4">
-      <div className="mb-3 flex items-center justify-between">
-        <h3 className="font-medium text-white">{gender === 'male' ? 'Masculino' : 'Feminino'}</h3>
-        <span
-          className={
-            'rounded-full px-2 py-0.5 text-xs font-medium ' +
-            (isDefault ? 'bg-slate-800 text-slate-400' : 'bg-blue-950 text-blue-300')
-          }
-        >
-          {isDefault ? 'Padrão' : 'Personalizado'}
-        </span>
+      <div className="mb-3 flex items-center gap-2">
+        <input
+          type="text"
+          value={label}
+          disabled={!canEdit}
+          onChange={(e) => setLabel(e.target.value)}
+          placeholder="Nome do grupo"
+          className="flex-1 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm font-medium text-white placeholder-slate-500 disabled:opacity-60"
+        />
+        {canRestoreFromPreset && (
+          <span className="shrink-0 rounded-full bg-blue-950 px-2 py-0.5 text-xs font-medium text-blue-300">
+            do padrão FPJ
+          </span>
+        )}
       </div>
 
       <div className="space-y-2">
@@ -144,16 +170,24 @@ export function WeightCategoryGrid({ groupKey, gender, initialCategories, initia
           >
             Salvar
           </button>
-          {!isDefault && (
+          {canRestoreFromPreset && (
             <button
               type="button"
-              onClick={handleReset}
+              onClick={handleRestore}
               disabled={loading}
               className="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-300 transition hover:bg-slate-800 disabled:opacity-60"
             >
-              Restaurar padrão
+              Restaurar valores da FPJ
             </button>
           )}
+          <button
+            type="button"
+            onClick={handleDelete}
+            disabled={loading}
+            className="ml-auto rounded-lg border border-red-900 px-4 py-2 text-sm text-red-400 transition hover:bg-red-950 disabled:opacity-60"
+          >
+            Apagar grupo
+          </button>
         </div>
       )}
 

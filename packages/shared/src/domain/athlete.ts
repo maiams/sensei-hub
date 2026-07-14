@@ -16,23 +16,6 @@ export type Belt = z.infer<typeof Belt>
 export const Gender = z.enum(['male', 'female', 'not_informed'])
 export type Gender = z.infer<typeof Gender>
 
-// Age classes per IJF/CBJ — derived from birthDate at event time, never stored as a fixed field
-export const AgeClass = z.enum([
-  'pre_mirim',       // 7–9
-  'mirim',           // 10–11
-  'infantil',        // 12–13
-  'infanto_juvenil', // 14–15
-  'juvenil',         // 16–17
-  'junior',          // 18–20
-  'senior',          // 15+ (open adult)
-  'veteran_j1',      // 30–39
-  'veteran_j2',      // 40–49
-  'veteran_m3',      // 50–59
-  'veteran_m4',      // 60–69
-  'veteran_m5',      // 70+
-])
-export type AgeClass = z.infer<typeof AgeClass>
-
 // Mutable fields an operator can provide when creating an athlete
 const AthleteWritableFields = {
   fullName: z.string().min(2).max(120),

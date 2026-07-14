@@ -158,7 +158,9 @@ sensei-hub/
 **Pendente da Fase 2:**
 - [ ] Confirmar com o usuário se outras federações/estados usam tabela diferente da FPJ para o caso de a academia competir fora de SP
 
-### Adendo à Fase 2 (2026-07-14) — Categorias de peso editáveis por academia
+### Adendo à Fase 2 (2026-07-14, v1 — SUPERADA, ver v2 abaixo) — Categorias de peso editáveis por academia
+
+> **Esta versão foi substituída poucas horas depois pela v2 (mesma data, seção seguinte).** O usuário simplificou ainda mais o pedido: em vez de 6 grupos fixos com Masculino/Feminino fixo, as divisões e seus grupos viraram totalmente livres (nome livre, idade livre, qualquer número de grupos por divisão, cada grupo com nome livre). Mantido aqui só como histórico da decisão intermediária.
 
 O usuário apontou que a tabela de `AgeClassService` (hardcoded, sem persistência) precisava ser editável — campeonatos pequenos frequentemente têm dificuldade de preencher certas categorias (ex.: Sub-13 nas categorias mais pesadas) e precisam mesclar faixas. Pediu explicitamente uma UI em grid.
 
@@ -177,6 +179,35 @@ O usuário apontou que a tabela de `AgeClassService` (hardcoded, sem persistênc
 
 **Decisão de design:** esta tabela é o *default* por academia usado para pré-preencher a criação de divisões na Fase 3A — não impede um evento específico de usar uma divisão totalmente customizada (o `DivisionModel` planejado tem `weightLimitKg` livre por divisão). Editar aqui muda o que vem pré-preenchido para todos os eventos futuros da academia; não é por evento.
 - [ ] `next lint` não está configurado neste projeto (setup interativo, não rodado) — considerar configurar ESLint numa fase futura se desejado
+
+### Adendo à Fase 2 (2026-07-14, v2) — Divisões e grupos totalmente livres por academia
+
+Poucas horas após a v1 (acima), o usuário simplificou ainda mais o pedido: *"o próprio conceito de masculino/feminino deve ser editável para qualquer campeonato... se o criador do campeonato quiser fazer uma mistura, ele faz. se quiser separar por classe/peso/sexo, separa. deixa a coisa livre."* Também esclareceu que essa configuração é estritamente de competição — a academia (cadastro de atleta) continua só registrando `birthDate`, sem nenhum campo de categoria.
+
+Isso substituiu por completo o design da v1 (6 grupos fixos derivados do enum `AgeClass`, cada um com exatamente Masculino/Feminino). Planejado com um agente de planejamento (revisão de arquitetura) antes de implementar, dado que envolvia apagar trabalho recém-commitado — plano salvo e aprovado antes da execução.
+
+**Modelo de dados final:**
+- **`DivisionTemplateModel`** — uma divisão por academia: `{ academyId, key (slug, imutável), label, minAge: number|null, maxAge: number|null, order }`. Sem campo `type`: uma divisão sem restrição de idade é simplesmente `minAge: null, maxAge: null`.
+- **`DivisionGroupModel`** — substitui o antigo par fixo Masculino/Feminino: `{ academyId, divisionTemplateId, label (texto livre), order, categories: [{label, maxKg}], sourcePreset: {templateKey, groupLabel: 'male'|'female'} | null }`. Uma divisão pode ter 0, N grupos, com qualquer nome. `sourcePreset` é um campo interno (nunca exposto na UI) que rastreia se o grupo veio do preset FPJ, permitindo o botão "Restaurar valores da FPJ" continuar funcionando mesmo depois de renomear o grupo (testado: renomear "Masculino" → "Livre" e confirmar que o restore ainda traz os valores originais).
+
+**Removido por completo:** `AgeClassService.ts` (e seus 38 testes), `AgeClass` enum de `packages/shared/src/domain/athlete.ts`, `WeightCategoryModel.ts`/`WeightCategoryService.ts`/`weightCategories.ts` (rota) da v1, `AGE_CLASS_GROUPS`. Os números da FPJ foram preservados como dados estáticos em `packages/server/src/services/fpjPreset.ts`, usados só pela ação explícita "carregar padrão" e pelo restore por grupo — não são mais um fallback implícito.
+
+**Serviços novos:**
+- `DivisionTemplateService`: `listTemplates`, `createTemplate` (slug gerado no servidor, deduplicado), `updateTemplate` (label/idade, `key` imutável), `deleteTemplate` (cascata nos grupos), `loadFpjPreset` (idempotente — só cria as divisões do preset que ainda não existem por `key`, não sobrescreve edições em divisões já carregadas).
+- `DivisionGroupService`: `listGroups`, `createGroup`, `updateGroup` (label e/ou categorias, mesma validação de ordem ascendente/só-último-aberto de sempre), `deleteGroup`, `restoreFromPreset` (400 se o grupo não veio de um preset).
+
+**Rotas:** `/api/division-templates` (CRUD + `/load-preset`) e `/api/division-templates/:key/groups` (CRUD + `/:groupId/restore`). Mesma RBAC de sempre: leitura `staff+`, escrita `academy_admin`.
+
+**UI:** `/settings/divisions` (substitui `/settings/weight-categories`) — cada divisão é um card com nome e idade mín/máx editáveis, botão de apagar (confirma e avisa quantos grupos serão apagados junto), e dentro dela os grupos (nome livre + grid de categorias + apagar grupo + restaurar do preset quando aplicável). Estado vazio oferece "Carregar padrão FPJ" ou "Criar divisão". `WeightCategoryGrid.tsx` foi generalizado para representar um grupo (não mais gênero fixo).
+
+**Bugs encontrados e corrigidos durante o teste manual desta versão:** nenhum novo — reaproveitou as correções já feitas na v1 (`apiFetch` sem `Content-Type` em requests sem corpo, hydration mismatch de `canEdit` calculado fora do `useEffect`).
+
+**Testado manualmente via Playwright, cenário completo do pedido original:** carregar padrão FPJ (6 divisões) → apagar "Pré-mirim" inteira (divisão + 2 grupos, confirmação avisando a cascata) → dentro de "Adulto", apagar o grupo "Feminino" e renomear "Masculino" para "Livre" → editar uma categoria e confirmar que "Restaurar valores da FPJ" traz os valores originais mantendo o nome "Livre" → criar do zero uma divisão "PCD" sem nenhuma restrição de idade, com um único grupo "Aberto" e uma categoria única (sem split de gênero) → confirmar modo leitura para role `staff` (sem controles de edição, sem erro de hydration).
+
+63 testes em `divisionTemplate.test.ts` (era 9 na v1 com escopo menor), typecheck limpo em todos os pacotes.
+
+**Pendente:**
+- [ ] Fase 3A, quando implementada, deve consumir `DivisionTemplateService.listTemplates()` como ponto de partida para a criação de divisões por evento — cada `DivisionGroup` de um template vira candidato a uma `Division` real do evento (1:1 ou o organizador ajusta).
 
 ---
 

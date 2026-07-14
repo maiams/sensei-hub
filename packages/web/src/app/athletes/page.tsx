@@ -64,10 +64,10 @@ export default function AthletesPage() {
           <h1 className="text-2xl font-bold tracking-tight">Atletas</h1>
           <div className="flex items-center gap-3">
             <Link
-              href="/settings/weight-categories"
+              href="/settings/divisions"
               className="text-sm text-slate-400 transition hover:text-slate-200"
             >
-              Categorias de peso
+              Divisões
             </Link>
             <Link
               href="/athletes/new"
