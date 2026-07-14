@@ -129,15 +129,18 @@ sensei-hub/
 
 **Decisões tomadas nesta fase (divergências/adições ao plano original):**
 
-1. **Classe etária "sênior" fixada em 21–29 anos para `calculateAgeClass`.** O comentário original no schema Zod dizia "15+ (open adult)", que se sobrepõe a todas as outras classes por design em torneios reais (um atleta pode competir em mais de uma classe). Como a função deriva **uma única classe por idade**, foi necessário particionar estritamente: sênior preenche a lacuna entre júnior (termina em 20) e veterano J1 (começa em 30). Revisitar se uma federação específica usar regra diferente.
-2. **Tabela de categorias de peso populada apenas para classes adultas (júnior, sênior, veteranos) — vazia/erro para classes de base (pré-mirim a juvenil).** Categorias de peso infanto-juvenis variam por federação estadual e por temporada; não há fonte confiável para fabricar esses números com segurança em uma plataforma que vai operar torneios reais envolvendo crianças. `getWeightCategories`/`assignWeightCategory` lançam `AgeClassServiceError` para essas classes até que a tabela oficial seja fornecida (possivelmente configurável por evento/divisão na Fase 3A). **Ação necessária do usuário:** fornecer a tabela oficial (CBJ ou federação estadual) antes de rodar um evento de base.
+1. **Limites de idade das classes de base e tabela de categorias de peso corrigidos com fonte oficial FPJ (2026-07-14).** A primeira versão deste serviço usava limites de idade e pesos reconstruídos sem fonte primária (ver histórico do commit anterior). O usuário forneceu a "Tabela de Classes e Categorias 2026" da Federação Paulista de Judô (v2, 03/02/2026, https://fpj.com.br — declarada "conforme tabela da CBJ"), que foi extraída e usada para corrigir `AgeClassService.ts`:
+   - Limites de idade: Sub-09 (7-8) = `pre_mirim`, Sub-11 (9-10) = `mirim`, Sub-13 (11-12) = `infantil`, Sub-15 (13-14) = `infanto_juvenil`, Cadete/Sub-18 (15-17) = `juvenil`. Isso muda os limites anteriores (que usavam faixas de 2 anos uniformes a partir de 7).
+   - Tabela de peso completa (masculino/feminino) para todas as classes de base, substituindo o erro explícito anterior.
+   - `junior`/`senior`/`veteran_*` continuam sendo a partição deste codebase para a faixa "Adulto" única da tabela FPJ (que não subdivide por idade, só por peso) — mantido o limite 21–29 para sênior como suposição própria, sem contradição da fonte.
+2. **Categorias de peso são um *default*, não uma regra rígida.** O usuário apontou que campeonatos pequenos frequentemente precisam mesclar categorias esparsas (ex.: unir Pesado + Super Pesado de uma classe de base quando não há atletas suficientes para preencher as duas). Isso já é suportado pelo design existente: `DivisionModel` da Fase 3A é criado manualmente por evento com `weightLimitKg` livre — a tabela do `AgeClassService` serve apenas para pré-preencher o formulário de criação de divisões, não para validar/bloquear. Nenhuma mudança de código adicional necessária agora; documentado como intenção de design para quem implementar a Fase 3A.
 3. **`enrollmentNumber` gerado via contador atômico em `AcademyModel.athleteSeq`** (`findByIdAndUpdate($inc)`), não via UUID — mais legível para operação de balcão, e atômico mesmo sob concorrência.
 4. **Guardian é 1:1 com atleta no MVP** (índice único em `athleteId`). `POST /guardian` retorna 409 se já existe um; não há endpoint de atualização de guardian nesta fase — cobrir depois se necessário.
 5. **Helper de teste passou a subir um replica-set de 1 nó** (`MongoMemoryReplSet`) em vez de standalone, para suportar `session.withTransaction()` usado na criação atômica de atleta+guardian. Mais fiel à topologia de produção.
 
 **Pendente da Fase 2:**
 - [ ] UI mínima (lista de atletas com busca, formulário de cadastro/edição com seção condicional de responsável, perfil com histórico de faixa/peso)
-- [ ] Tabela de categorias de peso para classes de base (bloqueado em fonte de dados oficial — ver decisão 2 acima)
+- [ ] Confirmar com o usuário se outras federações/estados usam tabela diferente da FPJ para o caso de a academia competir fora de SP
 
 ---
 
