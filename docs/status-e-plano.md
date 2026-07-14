@@ -157,6 +157,25 @@ sensei-hub/
 
 **Pendente da Fase 2:**
 - [ ] Confirmar com o usuário se outras federações/estados usam tabela diferente da FPJ para o caso de a academia competir fora de SP
+
+### Adendo à Fase 2 (2026-07-14) — Categorias de peso editáveis por academia
+
+O usuário apontou que a tabela de `AgeClassService` (hardcoded, sem persistência) precisava ser editável — campeonatos pequenos frequentemente têm dificuldade de preencher certas categorias (ex.: Sub-13 nas categorias mais pesadas) e precisam mesclar faixas. Pediu explicitamente uma UI em grid.
+
+**Implementado:**
+- `packages/shared/src/domain/weightCategory.ts`: `WeightCategoryRow`, `UpdateWeightCategoriesInput`, `WeightCategoryGroupDTO`, `AGE_CLASS_GROUPS` — agrupa as 12 `AgeClass` em 6 unidades editáveis (pré-mirim, mirim, infantil, infanto-juvenil, juvenil ficam sozinhas; júnior+sênior+veteranos viram um único grupo "Adulto", espelhando como a fonte FPJ e o default já tratavam essa faixa).
+- `WeightCategoryModel` (Mongoose): override por `academyId + gender + ageClass`, índice único.
+- `WeightCategoryService`: `listGroups` (mescla override com o default do `AgeClassService`, marca `isDefault`), `updateGroup` (valida ordem estritamente ascendente e que só a última categoria pode ser aberta/`maxKg: null`; grava em todas as `ageClasses` do grupo; audit log com `oldValue`/`newValue`), `resetGroup` (apaga o override, volta ao default; audit log), `getEffectiveCategories` (para uso futuro da Fase 3A ao pré-preencher divisões).
+- Rotas `GET/PUT/DELETE /api/weight-categories(/:groupKey/:gender)` — leitura `staff+`, escrita `academy_admin` (autorização real no servidor).
+- `/settings/weight-categories`: página com um grid por grupo × gênero (12 grids), linhas editáveis (nome + até quantos kg), adicionar/remover categoria, salvar, restaurar padrão. Controles de edição escondidos para quem não é `academy_admin` (decodificação do JWT no cliente só para UX — nunca para autorização).
+- Link de acesso adicionado no cabeçalho de `/athletes`.
+- 9 testes novos em `weightCategory.test.ts` (97 no total do pacote server).
+
+**Bugs encontrados e corrigidos durante o teste manual desta feature:**
+1. **`apiFetch()` sempre enviava `Content-Type: application/json` mesmo em requests sem corpo** (o `DELETE` de restaurar padrão) — o parser de body do Fastify rejeita corpo vazio com esse header como JSON inválido, retornando 400 antes mesmo de chegar na rota. Corrigido em `lib/api.ts`: só seta o header quando `options.body` está definido. Esse bug já existia desde a Fase 2 original (afetava potencialmente qualquer chamada sem corpo), só não tinha sido exercitado ainda.
+2. **Hydration mismatch em `/settings/weight-categories`**: `canEdit` era calculado direto no corpo do componente a partir do `localStorage` (via `getCurrentRole()`), que não existe durante o SSR — servidor renderizava "modo leitura" e o cliente divergia após montar. Corrigido movendo o cálculo para dentro do `useEffect` (estado inicial `false`, igual em SSR e primeira renderização client).
+
+**Decisão de design:** esta tabela é o *default* por academia usado para pré-preencher a criação de divisões na Fase 3A — não impede um evento específico de usar uma divisão totalmente customizada (o `DivisionModel` planejado tem `weightLimitKg` livre por divisão). Editar aqui muda o que vem pré-preenchido para todos os eventos futuros da academia; não é por evento.
 - [ ] `next lint` não está configurado neste projeto (setup interativo, não rodado) — considerar configurar ESLint numa fase futura se desejado
 
 ---

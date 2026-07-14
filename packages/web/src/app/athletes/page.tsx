@@ -62,12 +62,20 @@ export default function AthletesPage() {
       <div className="mx-auto max-w-3xl">
         <div className="mb-6 flex items-center justify-between gap-4">
           <h1 className="text-2xl font-bold tracking-tight">Atletas</h1>
-          <Link
-            href="/athletes/new"
-            className="rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-500"
-          >
-            + Cadastrar atleta
-          </Link>
+          <div className="flex items-center gap-3">
+            <Link
+              href="/settings/weight-categories"
+              className="text-sm text-slate-400 transition hover:text-slate-200"
+            >
+              Categorias de peso
+            </Link>
+            <Link
+              href="/athletes/new"
+              className="rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-500"
+            >
+              + Cadastrar atleta
+            </Link>
+          </div>
         </div>
 
         <form onSubmit={handleSearchSubmit} className="mb-6 flex gap-2">

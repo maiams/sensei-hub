@@ -7,6 +7,7 @@ import { setupRoutes } from './routes/setup.js'
 import { authRoutes } from './routes/auth.js'
 import { userRoutes } from './routes/users.js'
 import { athleteRoutes } from './routes/athletes.js'
+import { weightCategoryRoutes } from './routes/weightCategories.js'
 import { env } from './config/env.js'
 
 export async function buildApp(): Promise<FastifyInstance> {
@@ -26,6 +27,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(authRoutes, { prefix: '/api' })
   await app.register(userRoutes, { prefix: '/api' })
   await app.register(athleteRoutes, { prefix: '/api' })
+  await app.register(weightCategoryRoutes, { prefix: '/api' })
 
   return app
 }

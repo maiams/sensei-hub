@@ -25,6 +25,23 @@ export function isLoggedIn(): boolean {
   return getAccessToken() !== null
 }
 
+// Decodes the JWT payload for UI display only (e.g. hiding an edit button for a
+// role that can't use it) — never trust this for authorization. The server
+// re-verifies the signature and re-checks the role on every request.
+export function getCurrentRole(): string | null {
+  const token = getAccessToken()
+  if (!token) return null
+  try {
+    const payloadB64 = token.split('.')[1]
+    if (!payloadB64) return null
+    const json = atob(payloadB64.replace(/-/g, '+').replace(/_/g, '/'))
+    const payload = JSON.parse(json) as { role?: string }
+    return payload.role ?? null
+  } catch {
+    return null
+  }
+}
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -64,7 +81,10 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
   async function doFetch(): Promise<Response> {
     const token = getAccessToken()
     const headers = new Headers(options.headers)
-    if (!(options.body instanceof FormData)) {
+    // Only set Content-Type when there's an actual JSON body — Fastify's body
+    // parser rejects an empty body sent with Content-Type: application/json
+    // (e.g. a DELETE with no payload) as invalid JSON, returning 400.
+    if (options.body !== undefined && !(options.body instanceof FormData)) {
       headers.set('Content-Type', 'application/json')
     }
     if (token) headers.set('Authorization', `Bearer ${token}`)
