@@ -115,7 +115,7 @@ sensei-hub/
 - [x] Testes do `authorize` middleware isolado (`__tests__/authorize.test.ts`: sem `authUser` → 401, role insuficiente → 403, role igual/superior → passa)
 - [x] Commit da Fase 1
 
-### Fase 2 — Backend concluído em 2026-07-13 (UI ainda pendente)
+### Fase 2 — Concluída em 2026-07-14 (backend + UI mínima)
 
 **Implementado:**
 - `AgeClassService` (puro, sem I/O): `calculateAgeClass`, `getWeightCategories`, `assignWeightCategory` — 33 testes cobrindo limites exatos de idade e categorias de peso
@@ -138,9 +138,26 @@ sensei-hub/
 4. **Guardian é 1:1 com atleta no MVP** (índice único em `athleteId`). `POST /guardian` retorna 409 se já existe um; não há endpoint de atualização de guardian nesta fase — cobrir depois se necessário.
 5. **Helper de teste passou a subir um replica-set de 1 nó** (`MongoMemoryReplSet`) em vez de standalone, para suportar `session.withTransaction()` usado na criação atômica de atleta+guardian. Mais fiel à topologia de produção.
 
+**UI mínima implementada (2026-07-14):**
+- `/login` — formulário e-mail/senha, tokens salvos em `localStorage`, redireciona para `/athletes`
+- `/athletes` — lista com busca (nome/CPF/matrícula), link para cadastro
+- `/athletes/new` — formulário de cadastro com seção condicional de responsável (aparece quando `birthDate` indica menor de 18)
+- `/athletes/[id]` — perfil com dados, responsável (se houver), histórico de faixa e peso com formulários inline para registrar novos
+- `/athletes/[id]/edit` — mesmo formulário de cadastro em modo edição (sem seção de responsável — guardian não é editável por aqui)
+- `packages/web/src/lib/api.ts` — `apiFetch()` com refresh silencioso de token em 401 (tenta 1x antes de redirecionar a `/login`)
+- `packages/web/src/lib/labels.ts` — labels PT-BR para enums e tradução de mensagens de erro da API
+
+**Bugs encontrados e corrigidos durante o teste manual (Playwright) desta UI:**
+1. **Tailwind não compilava nenhuma classe utilitária — faltava `packages/web/postcss.config.mjs`.** Esse arquivo nunca existiu desde a Fase 0; `@tailwindcss/postcss` estava como devDependency mas sem configuração do PostCSS, então `next dev`/`next build` nunca geravam as classes. Afetava todas as páginas já existentes (`/setup` também rodava sem estilo), não só as novas. Também foi necessário adicionar `@source "../**/*.{ts,tsx}"` em `globals.css` porque a detecção automática de conteúdo do Tailwind v4 não encontrava os arquivos `.tsx` neste monorepo pnpm.
+2. **Label de parentesco do responsável mostrava o valor bruto do enum** (`mother`) em vez de "Mãe" no perfil do atleta — faltava aplicar `GUARDIAN_RELATIONSHIP_LABELS`.
+3. **Mensagens de erro da API apareciam em inglês** (`Invalid CPF`) numa UI em português — adicionado `translateApiError()` em `lib/labels.ts` com tradução das mensagens conhecidas dos services.
+4. `next lint`/`next dev` reescrevem `tsconfig.json` automaticamente na primeira execução (comportamento padrão do Next 15, não é bug do projeto) — mantidas apenas as chaves necessárias (`allowJs`, `incremental`, `resolveJsonModule`, `isolatedModules`), revertida a reformatação cosmética dos arrays.
+
+**Verificação:** fluxo completo testado manualmente via Playwright contra um servidor real (Fastify + MongoDB replica-set efêmero, sem Docker disponível no ambiente) — setup → login → cadastro de atleta adulto → registro de peso → cadastro de atleta menor com responsável (seção condicional confirmada) → edição → busca na lista. Typecheck limpo em `shared`, `server`, `web`, `app`.
+
 **Pendente da Fase 2:**
-- [ ] UI mínima (lista de atletas com busca, formulário de cadastro/edição com seção condicional de responsável, perfil com histórico de faixa/peso)
 - [ ] Confirmar com o usuário se outras federações/estados usam tabela diferente da FPJ para o caso de a academia competir fora de SP
+- [ ] `next lint` não está configurado neste projeto (setup interativo, não rodado) — considerar configurar ESLint numa fase futura se desejado
 
 ---
 
@@ -151,7 +168,7 @@ sensei-hub/
 | 0 | Monorepo, shared types, server stub, Electron, Docker RS | Concluída |
 | 0.5 | Bugs supervisor, discriminated union bracket, DTOs | Concluída |
 | 1 | Auth + RBAC + first-run setup | Concluída |
-| 2 | Atleta CRUD + Guardian + Belt/Weight records | Backend concluído; UI pendente |
+| 2 | Atleta CRUD + Guardian + Belt/Weight records | Concluída |
 | 3A | Evento + Divisões + Inscrições | — |
 | 3B | Bracket engine puro + testes | — |
 | 3C | Persistência de bracket + match results | — |

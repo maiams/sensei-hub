@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation'
+import Link from 'next/link'
 
 async function getSetupStatus(): Promise<{ setupRequired: boolean }> {
   try {
@@ -20,11 +21,16 @@ export default async function HomePage() {
     redirect('/setup')
   }
 
-  // TODO: redirect to /dashboard once auth is in place on the frontend
   return (
     <main className="flex min-h-screen flex-col items-center justify-center bg-slate-950 text-white">
       <h1 className="text-4xl font-bold tracking-tight">Sensei Hub</h1>
       <p className="mt-3 text-slate-400">Plataforma local de gestão de academia e competições de judô</p>
+      <Link
+        href="/login"
+        className="mt-8 rounded-lg bg-blue-600 px-6 py-3 font-semibold text-white transition hover:bg-blue-500"
+      >
+        Entrar
+      </Link>
     </main>
   )
 }
