@@ -1,8 +1,5 @@
 import { z } from 'zod'
 
-export const BracketFormat = z.enum(['elimination', 'roundRobin'])
-export type BracketFormat = z.infer<typeof BracketFormat>
-
 export const EliminationSize = z.union([
   z.literal(8), z.literal(16), z.literal(32), z.literal(64), z.literal(128),
 ])
@@ -22,6 +19,26 @@ export type MatchPhase = z.infer<typeof MatchPhase>
 export const MatchState = z.enum(['pending', 'ready', 'in_progress', 'completed', 'bye', 'walkover'])
 export type MatchState = z.infer<typeof MatchState>
 
+// Discriminated union prevents invalid combinations like roundRobin + size 128 + repechageType
+export const EliminationBracketConfig = z.object({
+  format: z.literal('elimination'),
+  size: EliminationSize,
+  repechageType: RepechageType,
+})
+export type EliminationBracketConfig = z.infer<typeof EliminationBracketConfig>
+
+export const RoundRobinBracketConfig = z.object({
+  format: z.literal('roundRobin'),
+  size: RoundRobinSize,
+})
+export type RoundRobinBracketConfig = z.infer<typeof RoundRobinBracketConfig>
+
+export const BracketConfig = z.discriminatedUnion('format', [
+  EliminationBracketConfig,
+  RoundRobinBracketConfig,
+])
+export type BracketConfig = z.infer<typeof BracketConfig>
+
 export const BracketAthleteSlot = z.object({
   position: z.number().int().positive(),
   athleteId: z.string().nullable(),
@@ -33,9 +50,7 @@ export type BracketAthleteSlot = z.infer<typeof BracketAthleteSlot>
 export const BracketSchema = z.object({
   _id: z.string(),
   divisionId: z.string(),
-  format: BracketFormat,
-  size: z.union([EliminationSize, RoundRobinSize]),
-  repechageType: RepechageType,
+  config: BracketConfig,
   athletes: z.array(BracketAthleteSlot),
   generatedAt: z.string().datetime(),
   generatedBy: z.string(),

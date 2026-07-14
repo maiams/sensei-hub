@@ -4,18 +4,35 @@ export const EventStatus = z.enum(['draft', 'registration', 'in_progress', 'comp
 export type EventStatus = z.infer<typeof EventStatus>
 
 export const EventEntryStatus = z.enum([
-  'incomplete',  // missing required data
-  'registered',  // imported/entered, awaiting check-in
-  'checked_in',  // present at venue
-  'weighed_in',  // weigh-in done, category pending confirmation
-  'confirmed',   // category confirmed, eligible for bracket
-  'withdrawn',   // pulled out
+  'incomplete',   // missing required data
+  'registered',   // imported/entered, awaiting check-in
+  'checked_in',   // present at venue
+  'weighed_in',   // weigh-in done, category pending confirmation
+  'confirmed',    // category confirmed, eligible for bracket
+  'withdrawn',    // pulled out
 ])
 export type EventEntryStatus = z.infer<typeof EventEntryStatus>
 
 export const RegistrationMethod = z.enum(['import', 'manual'])
 export type RegistrationMethod = z.infer<typeof RegistrationMethod>
 
+// POST /api/events
+export const CreateEventInput = z.object({
+  hostAcademyId: z.string(),
+  name: z.string().min(2).max(200),
+  description: z.string().optional(),
+  eventDate: z.string().date(),
+  venue: z.string().optional(),
+})
+export type CreateEventInput = z.infer<typeof CreateEventInput>
+
+// PATCH /api/events/:id
+export const UpdateEventInput = CreateEventInput.omit({ hostAcademyId: true }).partial().extend({
+  status: EventStatus.optional(),
+})
+export type UpdateEventInput = z.infer<typeof UpdateEventInput>
+
+// Full document stored in MongoDB
 export const EventSchema = z.object({
   _id: z.string(),
   hostAcademyId: z.string(),
@@ -30,13 +47,22 @@ export const EventSchema = z.object({
 })
 export type Event = z.infer<typeof EventSchema>
 
+// POST /api/events/:id/divisions
+export const CreateDivisionInput = z.object({
+  name: z.string().min(1).max(120),
+  gender: z.enum(['male', 'female', 'mixed']),
+  ageClass: z.string(),              // AgeClass value
+  weightLimitKg: z.number().positive().optional(),
+})
+export type CreateDivisionInput = z.infer<typeof CreateDivisionInput>
+
 export const DivisionSchema = z.object({
   _id: z.string(),
   eventId: z.string(),
-  name: z.string(),             // e.g. "Masculino Adulto Médio -90kg"
+  name: z.string(),
   gender: z.enum(['male', 'female', 'mixed']),
-  ageClass: z.string(),         // AgeClass enum value
-  weightLimitKg: z.number().positive().optional(),  // null = absoluto
+  ageClass: z.string(),
+  weightLimitKg: z.number().positive().optional(),
   createdAt: z.string().datetime(),
 })
 export type Division = z.infer<typeof DivisionSchema>
@@ -45,7 +71,7 @@ export const EventEntrySchema = z.object({
   _id: z.string(),
   eventId: z.string(),
   divisionId: z.string(),
-  confirmedDivisionId: z.string().optional(),  // may differ after weigh-in
+  confirmedDivisionId: z.string().optional(),
   athleteId: z.string(),
   academyId: z.string(),
   registrationMethod: RegistrationMethod,

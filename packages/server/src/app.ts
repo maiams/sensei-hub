@@ -1,7 +1,11 @@
 import Fastify, { type FastifyInstance } from 'fastify'
 import cors from '@fastify/cors'
 import websocket from '@fastify/websocket'
+import jwt from '@fastify/jwt'
 import { healthRoutes } from './routes/health.js'
+import { setupRoutes } from './routes/setup.js'
+import { authRoutes } from './routes/auth.js'
+import { userRoutes } from './routes/users.js'
 import { env } from './config/env.js'
 
 export async function buildApp(): Promise<FastifyInstance> {
@@ -11,8 +15,15 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   await app.register(cors, { origin: true })
   await app.register(websocket)
+  await app.register(jwt, {
+    secret: env.JWT_SECRET,
+    sign: { expiresIn: env.JWT_EXPIRES_IN },
+  })
 
   await app.register(healthRoutes, { prefix: '/api' })
+  await app.register(setupRoutes, { prefix: '/api' })
+  await app.register(authRoutes, { prefix: '/api' })
+  await app.register(userRoutes, { prefix: '/api' })
 
   return app
 }

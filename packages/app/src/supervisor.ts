@@ -1,11 +1,18 @@
 import { ChildProcess, spawn } from 'child_process'
 import * as http from 'http'
-import * as path from 'path'
+import { MongoClient } from 'mongodb'
 
-const HEALTH_URL = 'http://127.0.0.1:3001/api/health'
 const HEALTH_INTERVAL_MS = 5_000
 const HEALTH_FAIL_THRESHOLD = 3
 const RESTART_DELAY_MS = 2_000
+
+export interface SupervisorConfig {
+  /** Network interface mongod binds to. '127.0.0.1' for single-node dev; '0.0.0.0' for cluster. */
+  bindIp?: string
+  serverPort?: number
+  mongodbUri?: string
+  jwtSecret?: string
+}
 
 export interface SupervisorEvents {
   onMongoReady: () => void
@@ -21,17 +28,30 @@ export class Supervisor {
   private consecutiveFails = 0
   private serverRestartCount = 0
   private stopping = false
+  private isRestarting = false  // prevents concurrent restartServer() calls
+
+  private readonly bindIp: string
+  private readonly serverPort: number
+  private readonly mongodbUri: string
+  private readonly jwtSecret: string
 
   constructor(
     private readonly mongoBin: string,
     private readonly mongoDataDir: string,
     private readonly serverScript: string,
     private readonly events: SupervisorEvents,
-  ) {}
+    config: SupervisorConfig = {},
+  ) {
+    this.bindIp = config.bindIp ?? '127.0.0.1'
+    this.serverPort = config.serverPort ?? 3001
+    this.mongodbUri = config.mongodbUri ?? `mongodb://127.0.0.1:27017/senseihub?replicaSet=sensei-rs`
+    this.jwtSecret = config.jwtSecret ?? 'dev-secret-change-in-production-min-32-chars'
+  }
 
   async start(): Promise<void> {
-    await this.startMongo()
-    await this.waitForMongo()
+    this.startMongo()
+    await this.waitForMongoPort()
+    await this.initReplicaSetIfNeeded()
     this.events.onMongoReady()
     await this.startServer()
     await this.waitForServer()
@@ -43,8 +63,7 @@ export class Supervisor {
     this.stopping = true
     if (this.healthTimer) clearInterval(this.healthTimer)
 
-    // Ask server to flush pending writes
-    await this.httpPost('http://127.0.0.1:3001/api/shutdown-prep').catch(() => null)
+    await this.httpPost(`http://127.0.0.1:${this.serverPort}/api/shutdown-prep`).catch(() => null)
 
     this.serverProcess?.kill('SIGTERM')
     this.mongoProcess?.kill('SIGTERM')
@@ -59,7 +78,7 @@ export class Supervisor {
     const args = [
       '--replSet', 'sensei-rs',
       '--dbpath', this.mongoDataDir,
-      '--bind_ip', '127.0.0.1',
+      '--bind_ip', this.bindIp,
       '--port', '27017',
       '--wiredTigerCacheSizeGB', '0.5',
     ]
@@ -73,25 +92,77 @@ export class Supervisor {
     })
   }
 
-  private async waitForMongo(timeoutMs = 30_000): Promise<void> {
+  private async waitForMongoPort(timeoutMs = 30_000): Promise<void> {
     const deadline = Date.now() + timeoutMs
     while (Date.now() < deadline) {
-      const ok = await this.checkTcpPort('127.0.0.1', 27017)
-      if (ok) return
+      if (await this.checkTcpPort('127.0.0.1', 27017)) return
       await sleep(500)
     }
     throw new Error('MongoDB did not start within 30s')
   }
 
+  /**
+   * Connects directly (no replicaSet param) and initiates the RS if not yet done.
+   * Safe to call multiple times — idempotent.
+   */
+  private async initReplicaSetIfNeeded(timeoutMs = 15_000): Promise<void> {
+    const client = new MongoClient('mongodb://127.0.0.1:27017', {
+      directConnection: true,
+      serverSelectionTimeoutMS: timeoutMs,
+    })
+    try {
+      await client.connect()
+      const admin = client.db('admin')
+
+      let alreadyInitiated = false
+      try {
+        await admin.command({ replSetGetStatus: 1 })
+        alreadyInitiated = true
+      } catch (err: unknown) {
+        const code = (err as { codeName?: string }).codeName
+        if (code !== 'NotYetInitialized') throw err
+      }
+
+      if (!alreadyInitiated) {
+        await admin.command({
+          replSetInitiate: {
+            _id: 'sensei-rs',
+            members: [{ _id: 0, host: '127.0.0.1:27017', priority: 1 }],
+          },
+        })
+        console.log('[supervisor] replica set initiated')
+        await this.waitForPrimary(admin, timeoutMs)
+      }
+    } finally {
+      await client.close()
+    }
+  }
+
+  private async waitForPrimary(admin: import('mongodb').Db, timeoutMs: number): Promise<void> {
+    const deadline = Date.now() + timeoutMs
+    while (Date.now() < deadline) {
+      const hello = await admin.command({ hello: 1 })
+      if (hello.isWritablePrimary) return
+      await sleep(500)
+    }
+    throw new Error('MongoDB did not elect a primary within timeout')
+  }
+
   private async startServer(): Promise<void> {
     this.serverProcess = spawn(process.execPath, [this.serverScript], {
       stdio: 'pipe',
-      env: { ...process.env, NODE_ENV: 'production' },
+      env: {
+        ...process.env,
+        NODE_ENV: 'production',
+        PORT: String(this.serverPort),
+        MONGODB_URI: this.mongodbUri,
+        JWT_SECRET: this.jwtSecret,
+      },
     })
     this.serverProcess.on('exit', (code) => {
       if (!this.stopping) {
         console.error(`[supervisor] server exited with code ${code}`)
-        this.restartServer()
+        this.scheduleServerRestart()
       }
     })
   }
@@ -99,8 +170,7 @@ export class Supervisor {
   private async waitForServer(timeoutMs = 30_000): Promise<void> {
     const deadline = Date.now() + timeoutMs
     while (Date.now() < deadline) {
-      const ok = await this.pingHealth()
-      if (ok) return
+      if (await this.pingHealth()) return
       await sleep(500)
     }
     throw new Error('Server did not become healthy within 30s')
@@ -114,19 +184,28 @@ export class Supervisor {
       } else {
         this.consecutiveFails++
         if (this.consecutiveFails >= HEALTH_FAIL_THRESHOLD) {
-          console.warn('[supervisor] health check failed, restarting server')
-          this.restartServer()
+          console.warn('[supervisor] health check failed 3 times, restarting server')
+          this.scheduleServerRestart()
         }
       }
     }, HEALTH_INTERVAL_MS)
   }
 
-  private async restartServer(): Promise<void> {
-    if (this.stopping) return
+  /** Idempotent: only one restart can run at a time. */
+  private scheduleServerRestart(): void {
+    if (this.stopping || this.isRestarting) return
+    this.isRestarting = true
     this.consecutiveFails = 0
-    this.serverRestartCount++
+
+    void this.doRestartServer().finally(() => {
+      this.isRestarting = false
+    })
+  }
+
+  private async doRestartServer(): Promise<void> {
     this.serverProcess?.kill('SIGTERM')
     await sleep(RESTART_DELAY_MS)
+    this.serverRestartCount++
     await this.startServer()
     await this.waitForServer()
     this.events.onServerDied(this.serverRestartCount)
@@ -134,10 +213,14 @@ export class Supervisor {
 
   private pingHealth(): Promise<boolean> {
     return new Promise((resolve) => {
-      const req = http.get(HEALTH_URL, { timeout: 3000 }, (res) => {
-        resolve(res.statusCode === 200)
-        res.resume()
-      })
+      const req = http.get(
+        `http://127.0.0.1:${this.serverPort}/api/health`,
+        { timeout: 3000 },
+        (res) => {
+          resolve(res.statusCode === 200)
+          res.resume()
+        },
+      )
       req.on('error', () => resolve(false))
       req.on('timeout', () => { req.destroy(); resolve(false) })
     })
@@ -156,6 +239,7 @@ export class Supervisor {
 
   private checkTcpPort(host: string, port: number): Promise<boolean> {
     return new Promise((resolve) => {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
       const net = require('net') as typeof import('net')
       const socket = new net.Socket()
       socket.setTimeout(500)
