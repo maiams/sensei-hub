@@ -211,7 +211,7 @@ Isso substituiu por completo o design da v1 (6 grupos fixos derivados do enum `A
 
 ---
 
-### Fase 3A — Backend concluído em 2026-07-15 (UI ainda não implementada)
+### Fase 3A — Concluída em 2026-07-15 (backend + UI)
 
 **Diverge do plano original da seção 7 abaixo** — aquele texto foi escrito antes de `DivisionTemplate`/`DivisionGroup` existirem e ainda descreve `DivisionModel: { eventId, name, gender, ageClass, weightLimitKg }` com `ageClass` como string livre e `gender` como enum fixo `male|female|mixed`. Isso não existe mais: `ageClass` era o enum `AgeClass`, apagado no adendo da Fase 2 v2. O modelo real implementado:
 
@@ -231,8 +231,15 @@ Isso substituiu por completo o design da v1 (6 grupos fixos derivados do enum `A
 
 **Testes:** 15 novos em `event.test.ts` (78 no total do pacote server) — CRUD de evento/divisão, import-from-templates (conta exata de divisões geradas), ciclo completo de inscrição, peso acima do limite não bloqueia, confirmação trocando de divisão, retirada de qualquer estado não-terminal + reason obrigatório, transição inválida (pular etapa) → 409, inscrição duplicada → 409, RBAC por rota.
 
+**UI:** `/events` (lista), `/events/new` (criação), `/events/[id]` (detalhe — cabeçalho editável para `event_manager+`, seção de divisões com importar-do-padrão/criar/editar/apagar, seção de inscrições com busca de atleta + seleção de divisão + botões de ação condicionais por status/role). Modo leitura/edição calculado em `useEffect` (evita hydration mismatch, mesmo padrão já usado em `/settings/divisions`).
+
+**Testado manualmente via Playwright** (ciclo completo, `MongoMemoryReplSet` efêmero + `pnpm dev`): criar evento → importar padrão FPJ (106 divisões geradas e renderizadas corretamente) → inscrever atleta com busca por nome → percorrer o ciclo de status inteiro (check-in → pesagem com peso acima do limite da divisão, não bloqueado → confirmar movendo para outra divisão → retirar com motivo) → RBAC visual confirmado logando como `staff` (cabeçalho somente leitura, sem botões de gerenciar divisão, sem "Retirar", com "Check-in" disponível). Nenhum erro de console durante todo o fluxo.
+
+**Bug encontrado e corrigido durante o teste manual:** a lista de inscrições sempre exibia o nome da divisão original (`entry.divisionId`), mesmo depois de `confirmEntry` mover a atleta para outra divisão via `confirmedDivisionId`. Corrigido em `EntriesSection` (`packages/web/src/app/events/[id]/page.tsx`) para preferir `entry.confirmedDivisionId` quando presente.
+
+**Limitação conhecida, não corrigida agora:** a UI calcula `withinDivisionLimit` no backend (peso acima do limite da divisão não bloqueia a pesagem) mas não exibe nenhum aviso visual disso ao operador — o peso é salvo silenciosamente. Fica anotado para quando a Fase 3B (brackets) ou uma revisão de UX da pesagem tocar essa tela.
+
 **Pendente da Fase 3A:**
-- [ ] UI mínima (criar evento, importar/editar divisões, tela de inscrição/check-in/pesagem/confirmação)
 - [ ] Tornar `import-from-templates` idempotente se isso virar um problema real no uso (hoje não é, mas fica anotado)
 
 ---
@@ -245,7 +252,7 @@ Isso substituiu por completo o design da v1 (6 grupos fixos derivados do enum `A
 | 0.5 | Bugs supervisor, discriminated union bracket, DTOs | Concluída |
 | 1 | Auth + RBAC + first-run setup | Concluída |
 | 2 | Atleta CRUD + Guardian + Belt/Weight records | Concluída |
-| 3A | Evento + Divisões + Inscrições | Backend concluído; UI pendente |
+| 3A | Evento + Divisões + Inscrições | Concluída |
 | 3B | Bracket engine puro + testes | — |
 | 3C | Persistência de bracket + match results | — |
 | 3D | Import Excel | — |

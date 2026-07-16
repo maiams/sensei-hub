@@ -63,6 +63,9 @@ export default function AthletesPage() {
         <div className="mb-6 flex items-center justify-between gap-4">
           <h1 className="text-2xl font-bold tracking-tight">Atletas</h1>
           <div className="flex items-center gap-3">
+            <Link href="/events" className="text-sm text-slate-400 transition hover:text-slate-200">
+              Eventos
+            </Link>
             <Link
               href="/settings/divisions"
               className="text-sm text-slate-400 transition hover:text-slate-200"

@@ -68,10 +68,40 @@ const API_ERROR_TRANSLATIONS: Record<string, string> = {
   'Reason is required': 'É necessário informar um motivo',
   'Email already in use': 'Este e-mail já está em uso',
   'Invalid credentials': 'E-mail ou senha inválidos',
+  'Event not found': 'Evento não encontrado',
+  'Division not found': 'Divisão não encontrada',
+  'Entry not found': 'Inscrição não encontrada',
+  'Cannot delete a division that has entries': 'Não é possível apagar uma divisão que já tem inscrições',
+  'Athlete is already registered in this division': 'Esta atleta já está inscrita nesta divisão',
 }
 
 export function translateApiError(message: string): string {
-  return API_ERROR_TRANSLATIONS[message] ?? message
+  if (API_ERROR_TRANSLATIONS[message]) return API_ERROR_TRANSLATIONS[message]
+  const transitionMatch = message.match(/^Cannot transition entry from "(.+)" to "(.+)"$/)
+  if (transitionMatch) {
+    const [, from, to] = transitionMatch
+    return `Não é possível mover a inscrição de "${EVENT_ENTRY_STATUS_LABELS[from!] ?? from}" para "${EVENT_ENTRY_STATUS_LABELS[to!] ?? to}"`
+  }
+  return message
+}
+
+export const EVENT_STATUS_LABELS: Record<string, string> = {
+  draft: 'Rascunho',
+  registration: 'Inscrições abertas',
+  in_progress: 'Em andamento',
+  completed: 'Concluído',
+  cancelled: 'Cancelado',
+}
+
+export const EVENT_STATUS_OPTIONS = Object.entries(EVENT_STATUS_LABELS).map(([value, label]) => ({ value, label }))
+
+export const EVENT_ENTRY_STATUS_LABELS: Record<string, string> = {
+  incomplete: 'Incompleta',
+  registered: 'Inscrita',
+  checked_in: 'Check-in feito',
+  weighed_in: 'Pesada',
+  confirmed: 'Confirmada',
+  withdrawn: 'Retirada',
 }
 
 export function formatDate(isoDate: string): string {
