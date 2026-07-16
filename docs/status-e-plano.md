@@ -262,7 +262,7 @@ Toda mudança automática de divisão ou desclassificação gera log de auditori
 
 ### Fase 3B — Concluída em 2026-07-16 (bracket engine puro)
 
-Implementado em `packages/server/src/domain/bracket/` — puro, sem I/O, sem Mongoose, exatamente como planejado. Nenhuma rota/persistência ainda (isso é a Fase 3C).
+Implementado em `packages/server/src/domain/bracket/` — puro, sem I/O, sem Mongoose, exatamente como planejado. Persistência e rotas vieram na Fase 3C, logo abaixo.
 
 **Arquivos:**
 - `types.ts` — `BracketEngine`, `Match`, `BracketState`, `AthleteSlot`, `BracketConfig`, `AdvanceResult` etc., fiéis à interface do plano original, com duas extensões documentadas no próprio código: `MatchResultInput` inclui `matchNumber` (a interface do plano não deixava explícito como `advanceMatch` saberia qual luta está sendo resolvida) e `points?: number` (usado só pelo Rodízio, pro desempate por pontuação — a regra exata de pontos por método é decisão do chamador, o engine só soma).
@@ -283,6 +283,35 @@ Implementado em `packages/server/src/domain/bracket/` — puro, sem I/O, sem Mon
 
 ---
 
+### Fase 3C — Concluída em 2026-07-16 (persistência de bracket + resultados)
+
+Camada de persistência/rotas em torno do motor puro da Fase 3B. `packages/shared/src/domain/bracket.ts` foi **reescrito** (não havia consumidor nenhum ainda, então sem custo de migração) pra usar exatamente o vocabulário do engine (`stage`, `'nenhuma'/'simples'/'normal'/'dupla'/'finalistas'`, `'rodizio'`) em vez do rascunho especulativo anterior — uma só terminologia entre engine, banco e API.
+
+**Modelos:**
+- `BracketModel` — `{ eventId, divisionId, format, size?, repechageType?, seed, slots, status: 'active'|'archived', version, generatedBy }`. `slots` guarda a lista de atletas elegíveis **de entrada** (o que foi passado pra `engine.generate()`), não o `BracketState.slots` interno do engine — que pra eliminação é um array posicional com `null` de verdade nas posições de bye (detalhe de implementação que nenhum código de reconstrução de estado precisa; só `RodizioEngine.getFinalRankings` lê `state.slots`, e só pra pegar a lista de IDs). Índice único parcial `{eventId, divisionId, status:'active'}` — só um bracket ativo por divisão por vez.
+- `MatchModel` — espelha `Match` do engine 1:1, com `bracketId`/`eventId`/`divisionId` pra consulta direta. Índice único `{bracketId, matchNumber}`.
+
+**`BracketService`:**
+- `generateBracket` — busca `EventEntry` com `status:'confirmed'` cuja divisão efetiva (`confirmedDivisionId ?? divisionId`) é a divisão alvo; converte em `AthleteSlot[]` **sem seeding** (nenhuma UI de cabeça-de-chave ainda — todo mundo entra `seed: null`, ordem decidida deterministicamente pelo `seed` do bracket, igual qualquer atleta não-cabeça-de-chave no engine). Sem entradas confirmadas → 400. Bracket ativo já existe → 409, a menos que `force:true`, que arquiva o anterior (audit log) e cria a próxima versão.
+- `getBracket` / `listMatches` — leitura simples do bracket/lutas ativos.
+- `recordResult` — chama `engine.advanceMatch` puro, persiste `updatedMatches`, e se `repechageType !== 'nenhuma'` chama `engine.calculateRepechage` de novo (idempotente por design, ver Fase 3B) recarregando o estado do banco — seguro de chamar depois de toda luta sem o serviço precisar rastrear qual rodada terminou.
+- `correctResult` — exige `reason`. **Só é permitido enquanto o resultado antigo não tiver sido decidido em nenhuma luta seguinte** (vencedor/perdedor antigos não aparecem como participante de nenhuma outra luta que já tenha resultado — luta seguinte ainda não disputada pode ser sobrescrita livremente, quantas vezes for preciso). Mesma filosofia de "terminal sem desfazer em cascata" já usada nos status `disqualified`/`withdrawn` de `EventEntry`. Limitação documentada: uma luta de repescagem ainda não disputada mas já **gerada** a partir do perdedor antigo (via `calculateRepechage`, que vincula por participante, não por referência direta) não é re-costurada automaticamente por uma correção — caso de borda fora do escopo desta fase.
+
+**Rotas** (exatamente as do plano original):
+```
+POST /api/events/:id/divisions/:did/bracket               event_manager+
+GET  /api/events/:id/divisions/:did/bracket                staff+
+GET  /api/events/:id/divisions/:did/matches                staff+
+POST /api/events/:id/divisions/:did/matches/:mid/result    event_manager+
+POST /api/events/:id/divisions/:did/matches/:mid/correct   event_manager+  (reason obrigatório)
+```
+
+**Testes (15 novos, 137 no total do server):** geração a partir de 8 confirmadas (Chave-8 completa), filtragem por divisão efetiva, 409 sem `force` / 201 com `force` versionando e arquivando, RBAC nas 5 rotas, propagação de vencedor pra luta seguinte, 409 relançando resultado, rejeição de `winnerId` que não é participante, geração automática de repescagem (`normal`) sem duplicar ao chamar de novo, correção permitida antes de propagar (inclusive repetida), bloqueada depois que a luta seguinte tem resultado real, 409 corrigindo luta sem resultado, e Rodízio (schedule fixo + lutas independentes sem propagação).
+
+**Pendente da Fase 3C:** classificação final (`getFinalRankings`) ainda não tem rota própria — fica pra quando o relatório/scoreboard precisar dela (a função já existe e é pura, testada na Fase 3B).
+
+---
+
 ## 5. Roadmap de Fases
 
 | Fase | Escopo | Status |
@@ -293,7 +322,7 @@ Implementado em `packages/server/src/domain/bracket/` — puro, sem I/O, sem Mon
 | 2 | Atleta CRUD + Guardian + Belt/Weight records | Concluída |
 | 3A | Evento + Divisões + Inscrições | Concluída |
 | 3B | Bracket engine puro + testes | Concluída |
-| 3C | Persistência de bracket + match results | — |
+| 3C | Persistência de bracket + match results | Concluída |
 | 3D | Import Excel | — |
 | 4 | Scoreboard + WebSocket | — |
 | 5 | Check-in + Weigh-in | — |
@@ -508,21 +537,9 @@ interface BracketEngine {
 
 ---
 
-### Fase 3C — Persistência de Bracket + Resultados (estimativa: 2 dias)
+### Fase 3C — Persistência de Bracket + Resultados
 
-- `BracketModel` e `MatchModel` persistem o `BracketState` do engine; o service orquestra: carrega estado → chama engine puro → persiste resultado
-- Correção de resultado: append-only no audit log com `oldValue`/`newValue`/`reason`; o service recalcula avanços afetados via engine
-
-**Rotas:**
-```
-POST /api/events/:id/divisions/:did/bracket               (event_manager+) — gera com entries 'confirmed'
-GET  /api/events/:id/divisions/:did/bracket               (staff+)
-GET  /api/events/:id/divisions/:did/matches               (staff+)
-POST /api/events/:id/divisions/:did/matches/:mid/result   (event_manager+)
-POST /api/events/:id/divisions/:did/matches/:mid/correct  (event_manager+) — reason obrigatório
-```
-
-Regenerar bracket com resultados já lançados → 409 (exige confirmação explícita via flag `force`, que arquiva o bracket anterior e grava audit log — nunca apaga).
+Concluída — ver "Fase 3C — Concluída em 2026-07-16" na seção 4, acima.
 
 ---
 

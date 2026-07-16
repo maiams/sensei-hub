@@ -11,10 +11,14 @@ import {
   ConfirmEntryInput,
   WithdrawEntryInput,
   EventEntryStatus,
+  GenerateBracketInput,
+  RecordMatchResultInput,
+  CorrectMatchResultInput,
 } from '@sensei-hub/shared'
 import { EventService, EventServiceError } from '../services/EventService.js'
 import { DivisionService, DivisionServiceError } from '../services/DivisionService.js'
 import { EventEntryService, EventEntryServiceError } from '../services/EventEntryService.js'
+import { BracketService, BracketServiceError } from '../services/BracketService.js'
 import { authenticate } from '../middleware/authenticate.js'
 import { authorize } from '../middleware/authorize.js'
 
@@ -25,13 +29,25 @@ const ListEntriesQuery = z.object({
   status: EventEntryStatus.optional(),
 })
 
+const MatchNumberParam = z.object({
+  id: z.string(),
+  did: z.string(),
+  mid: z.coerce.number().int().positive(),
+})
+
 export async function eventRoutes(app: FastifyInstance): Promise<void> {
   const eventService = new EventService()
   const divisionService = new DivisionService()
   const entryService = new EventEntryService()
+  const bracketService = new BracketService()
 
   function handleError(err: unknown, reply: FastifyReply) {
-    if (err instanceof EventServiceError || err instanceof DivisionServiceError || err instanceof EventEntryServiceError) {
+    if (
+      err instanceof EventServiceError ||
+      err instanceof DivisionServiceError ||
+      err instanceof EventEntryServiceError ||
+      err instanceof BracketServiceError
+    ) {
       return reply.status(err.statusCode).send({ error: err.message })
     }
     throw err
@@ -263,6 +279,98 @@ export async function eventRoutes(app: FastifyInstance): Promise<void> {
       try {
         const entry = await entryService.withdrawEntry(id, request.authUser.academyId, eid, parsed.data.reason, ctxFrom(request))
         return reply.send(entry)
+      } catch (err) {
+        return handleError(err, reply)
+      }
+    },
+  )
+
+  // ─── Bracket ─────────────────────────────────────────────────────────────
+
+  app.post(
+    '/events/:id/divisions/:did/bracket',
+    { preHandler: [authenticate, authorize('event_manager')] },
+    async (request, reply) => {
+      const { id, did } = request.params as { id: string; did: string }
+      const parsed = GenerateBracketInput.safeParse(request.body)
+      if (!parsed.success) {
+        return reply.status(400).send({ error: 'Validation failed', details: parsed.error.flatten() })
+      }
+      try {
+        const bracket = await bracketService.generateBracket(id, request.authUser.academyId, did, parsed.data, ctxFrom(request))
+        return reply.status(201).send(bracket)
+      } catch (err) {
+        return handleError(err, reply)
+      }
+    },
+  )
+
+  app.get(
+    '/events/:id/divisions/:did/bracket',
+    { preHandler: [authenticate, authorize('staff')] },
+    async (request, reply) => {
+      const { id, did } = request.params as { id: string; did: string }
+      try {
+        const bracket = await bracketService.getBracket(id, request.authUser.academyId, did)
+        return reply.send(bracket)
+      } catch (err) {
+        return handleError(err, reply)
+      }
+    },
+  )
+
+  app.get(
+    '/events/:id/divisions/:did/matches',
+    { preHandler: [authenticate, authorize('staff')] },
+    async (request, reply) => {
+      const { id, did } = request.params as { id: string; did: string }
+      try {
+        const matches = await bracketService.listMatches(id, request.authUser.academyId, did)
+        return reply.send(matches)
+      } catch (err) {
+        return handleError(err, reply)
+      }
+    },
+  )
+
+  app.post(
+    '/events/:id/divisions/:did/matches/:mid/result',
+    { preHandler: [authenticate, authorize('event_manager')] },
+    async (request, reply) => {
+      const parsedParams = MatchNumberParam.safeParse(request.params)
+      if (!parsedParams.success) {
+        return reply.status(400).send({ error: 'Validation failed', details: parsedParams.error.flatten() })
+      }
+      const parsed = RecordMatchResultInput.safeParse(request.body)
+      if (!parsed.success) {
+        return reply.status(400).send({ error: 'Validation failed', details: parsed.error.flatten() })
+      }
+      try {
+        const { id, did, mid } = parsedParams.data
+        const match = await bracketService.recordResult(id, request.authUser.academyId, did, mid, parsed.data, ctxFrom(request))
+        return reply.send(match)
+      } catch (err) {
+        return handleError(err, reply)
+      }
+    },
+  )
+
+  app.post(
+    '/events/:id/divisions/:did/matches/:mid/correct',
+    { preHandler: [authenticate, authorize('event_manager')] },
+    async (request, reply) => {
+      const parsedParams = MatchNumberParam.safeParse(request.params)
+      if (!parsedParams.success) {
+        return reply.status(400).send({ error: 'Validation failed', details: parsedParams.error.flatten() })
+      }
+      const parsed = CorrectMatchResultInput.safeParse(request.body)
+      if (!parsed.success) {
+        return reply.status(400).send({ error: 'Validation failed', details: parsed.error.flatten() })
+      }
+      try {
+        const { id, did, mid } = parsedParams.data
+        const match = await bracketService.correctResult(id, request.authUser.academyId, did, mid, parsed.data, ctxFrom(request))
+        return reply.send(match)
       } catch (err) {
         return handleError(err, reply)
       }
