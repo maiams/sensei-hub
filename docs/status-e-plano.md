@@ -260,6 +260,29 @@ Toda mudança automática de divisão ou desclassificação gera log de auditori
 
 ---
 
+### Fase 3B — Concluída em 2026-07-16 (bracket engine puro)
+
+Implementado em `packages/server/src/domain/bracket/` — puro, sem I/O, sem Mongoose, exatamente como planejado. Nenhuma rota/persistência ainda (isso é a Fase 3C).
+
+**Arquivos:**
+- `types.ts` — `BracketEngine`, `Match`, `BracketState`, `AthleteSlot`, `BracketConfig`, `AdvanceResult` etc., fiéis à interface do plano original, com duas extensões documentadas no próprio código: `MatchResultInput` inclui `matchNumber` (a interface do plano não deixava explícito como `advanceMatch` saberia qual luta está sendo resolvida) e `points?: number` (usado só pelo Rodízio, pro desempate por pontuação — a regra exata de pontos por método é decisão do chamador, o engine só soma).
+- `seeding.ts` — `seedPositions(size)`: a permutação matemática padrão de seed de torneio (1 e 2 sempre em metades opostas, 3/4 no meio de cada metade — mesmo algoritmo usado universalmente em brackets esportivos, não é código da Zempo). `assignSlots()`: distribui atletas reais nas posições; byes caem automaticamente nos seeds mais altos (não precisou de lógica especial — é uma propriedade da própria permutação). Separação de mesmo clube: só move atletas **não-cabeças de chave** (seeds explícitos nunca são realocados — é proteção competitiva, não conveniência); um conflito entre dois cabeças de chave forçados adjacentes fica documentado como limitação aceita.
+- `bracketTree.ts` — numeração determinística de lutas por rodada (`matchNumberFor`), igual à fórmula "Padrão geral" do doc.
+- `EliminationEngine.ts` — `generate/getReadyMatches/advanceMatch/calculateRepechage/getFinalRankings`. Decisão de numeração documentada: a final é **sempre** a luta `size-1` (não se desloca conforme o tipo de repescagem, diferente de alguns exemplos do doc de referência que pareciam inconsistentes entre si); bronze (só em `simples`) fica reservado no número `size`; lutas de repescagem são numeradas sequencialmente a partir de `size+1`, na ordem em que são geradas.
+- `RodizioEngine.ts` + `rodizioSchedule.ts` — ordens fixas de luta pra Rodízio 3 a 6 (copiadas literalmente do doc). Classificação: vitórias → pontos → confronto direto **dentro do grupo empatado** (generaliza o caso de 2 pra qualquer tamanho de grupo — resolve corretamente um empate triplo não-cíclico) → sorteio determinístico (seed do bracket) só quando sobra um ciclo genuíno tipo pedra-papel-tesoura (matematicamente não tem solução por confronto direto nesse caso).
+
+**calculateRepechage é idempotente por design:** deriva tudo de `state.matches` (não do parâmetro `completedRound`, que é aceito só por compatibilidade com a interface) — pode ser chamado depois de qualquer `advanceMatch` sem o chamador precisar rastrear exatamente qual rodada terminou; lutas já geradas nunca duplicam (checadas via `groupMatchNumber`).
+
+**Testes (42 novos, 122 no total do pacote server):**
+- `bracket.seeding.test.ts` (12) — tabela de seed padrão Chave-8, byes protegendo os melhores seeds, separação de mesmo clube, determinismo do PRNG.
+- `bracket.elimination.test.ts` (14) — estrutura da Chave-8, byes simples e byes em cascata (2 atletas numa Chave-8), validações de `advanceMatch`, e **os 5 tipos de repescagem verificados manualmente com um mesmo cenário de partidas** (`nenhuma`, `simples`, `normal`, `dupla`, `finalistas`), cada um conferindo a classificação final completa (1º-7º).
+- `bracket.rodizio.test.ts` (11) — ordens fixas de Rodízio 3/4/5/6, desempate por vitórias/pontos/sorteio determinístico.
+- `bracket.edgeCases.test.ts` (5) — número ímpar de atletas (7 numa Chave-8), WO após retirada, determinismo completo (`generate()` idêntico dado mesma entrada+seed), e um empate triplo **resolvível** por confronto direto (não-cíclico, construído e conferido à mão).
+
+**Pendente da Fase 3B:** nada — engine completo conforme especificado. Persistência, rotas e integração com o fluxo de inscrições confirmadas ficam pra Fase 3C.
+
+---
+
 ## 5. Roadmap de Fases
 
 | Fase | Escopo | Status |
@@ -269,7 +292,7 @@ Toda mudança automática de divisão ou desclassificação gera log de auditori
 | 1 | Auth + RBAC + first-run setup | Concluída |
 | 2 | Atleta CRUD + Guardian + Belt/Weight records | Concluída |
 | 3A | Evento + Divisões + Inscrições | Concluída |
-| 3B | Bracket engine puro + testes | — |
+| 3B | Bracket engine puro + testes | Concluída |
 | 3C | Persistência de bracket + match results | — |
 | 3D | Import Excel | — |
 | 4 | Scoreboard + WebSocket | — |
