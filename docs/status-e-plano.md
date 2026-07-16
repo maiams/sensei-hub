@@ -207,7 +207,33 @@ Isso substituiu por completo o design da v1 (6 grupos fixos derivados do enum `A
 63 testes em `divisionTemplate.test.ts` (era 9 na v1 com escopo menor), typecheck limpo em todos os pacotes.
 
 **Pendente:**
-- [ ] Fase 3A, quando implementada, deve consumir `DivisionTemplateService.listTemplates()` como ponto de partida para a criação de divisões por evento — cada `DivisionGroup` de um template vira candidato a uma `Division` real do evento (1:1 ou o organizador ajusta).
+- [x] Fase 3A, quando implementada, deve consumir `DivisionTemplateService.listTemplates()` como ponto de partida para a criação de divisões por evento — cada `DivisionGroup` de um template vira candidato a uma `Division` real do evento (1:1 ou o organizador ajusta). **Feito — ver seção Fase 3A abaixo.**
+
+---
+
+### Fase 3A — Backend concluído em 2026-07-15 (UI ainda não implementada)
+
+**Diverge do plano original da seção 7 abaixo** — aquele texto foi escrito antes de `DivisionTemplate`/`DivisionGroup` existirem e ainda descreve `DivisionModel: { eventId, name, gender, ageClass, weightLimitKg }` com `ageClass` como string livre e `gender` como enum fixo `male|female|mixed`. Isso não existe mais: `ageClass` era o enum `AgeClass`, apagado no adendo da Fase 2 v2. O modelo real implementado:
+
+**Models:**
+- `EventModel`: `hostAcademyId, name, description?, eventDate, venue?, status (draft|registration|in_progress|completed|cancelled), createdBy`.
+- `DivisionModel`: **sem `gender`/`ageClass`** — `{ eventId, name, minAge: number|null, maxAge: number|null, weightLimitKg: number|null, sourceTemplateKey?, sourceGroupId? }`. Uma divisão de evento é um bracket concreto (uma faixa etária opcional + um limite de peso), não mais um par gênero+classe fixo. `sourceTemplateKey`/`sourceGroupId` são só rastreabilidade opcional de onde a divisão veio (ver ação de import abaixo) — a divisão é uma linha independente, editável/apagável depois sem restrição.
+- `EventEntryModel`: igual ao planejado, com índice único `{eventId, divisionId, athleteId}` (evita inscrição duplicada na mesma divisão; a mesma atleta pode ter entradas em divisões diferentes do mesmo evento).
+
+**Nova ação — `POST /api/events/:id/divisions/import-from-templates`** (não estava no plano original, criada para integrar com o trabalho de Fase 2): expande `DivisionTemplate` × `DivisionGroup` × linha de categoria de peso em uma `Division` de evento por categoria (ex.: template "Adulto" com grupos Masculino/Feminino de 7 categorias cada gera 14 divisões). Body opcional `{ templateKeys?: string[] }` filtra quais templates importar; sem filtro importa todos. Não é idempotente (rodar duas vezes duplica) — aceitável porque o organizador normalmente importa uma vez e edita depois; documentado aqui como limitação conhecida, não corrigida por falta de necessidade agora.
+
+**`EventEntryService`** — máquina de estados implementada exatamente como planejado (`incomplete→registered→checked_in→weighed_in→confirmed`, `withdrawn` alcançável de qualquer estado não-terminal, transição inválida → 409):
+- `recordWeighIn` reaproveita `WeightService.recordWeight()` (cria `WeightRecord` real vinculado à atleta, mesmo fluxo do perfil) — retorna `withinDivisionLimit: boolean` como alerta, nunca bloqueia.
+- `confirmEntry` aceita `confirmedDivisionId` opcional pra mover a atleta pra outra divisão no momento da confirmação.
+- `withdrawEntry` exige `reason`.
+
+**Rotas:** exatamente as do plano original (`/api/events`, `/api/events/:id/divisions`, `/api/events/:id/entries` + as 4 transições), mais a rota de import acima. RBAC igual ao planejado: `event_manager+` pra criar/editar evento e divisão, `staff+` pra check-in/listagem/inscrição manual, `weigh_in_operator+` pra pesagem, `event_manager+` pra confirmar/retirar.
+
+**Testes:** 15 novos em `event.test.ts` (78 no total do pacote server) — CRUD de evento/divisão, import-from-templates (conta exata de divisões geradas), ciclo completo de inscrição, peso acima do limite não bloqueia, confirmação trocando de divisão, retirada de qualquer estado não-terminal + reason obrigatório, transição inválida (pular etapa) → 409, inscrição duplicada → 409, RBAC por rota.
+
+**Pendente da Fase 3A:**
+- [ ] UI mínima (criar evento, importar/editar divisões, tela de inscrição/check-in/pesagem/confirmação)
+- [ ] Tornar `import-from-templates` idempotente se isso virar um problema real no uso (hoje não é, mas fica anotado)
 
 ---
 
@@ -219,7 +245,7 @@ Isso substituiu por completo o design da v1 (6 grupos fixos derivados do enum `A
 | 0.5 | Bugs supervisor, discriminated union bracket, DTOs | Concluída |
 | 1 | Auth + RBAC + first-run setup | Concluída |
 | 2 | Atleta CRUD + Guardian + Belt/Weight records | Concluída |
-| 3A | Evento + Divisões + Inscrições | — |
+| 3A | Evento + Divisões + Inscrições | Backend concluído; UI pendente |
 | 3B | Bracket engine puro + testes | — |
 | 3C | Persistência de bracket + match results | — |
 | 3D | Import Excel | — |

@@ -47,25 +47,72 @@ export const EventSchema = z.object({
 })
 export type Event = z.infer<typeof EventSchema>
 
+// A Division is one concrete bracket for an event — one age range, one weight
+// limit. It has no fixed "gender"/"ageClass" enum: like DivisionTemplate/
+// DivisionGroup (see domain/divisionTemplate.ts), age range is free (null/null
+// = no restriction) and the group label (Masculino, Misto, Cadeirantes...) is
+// just part of `name`. `sourceTemplateKey`/`sourceGroupId` are optional
+// traceability back to the academy template a division was generated from via
+// POST /api/events/:id/divisions/import-from-templates — a division created
+// this way is a normal, independently editable/deletable row afterwards.
+//
 // POST /api/events/:id/divisions
 export const CreateDivisionInput = z.object({
   name: z.string().min(1).max(120),
-  gender: z.enum(['male', 'female', 'mixed']),
-  ageClass: z.string(),              // AgeClass value
-  weightLimitKg: z.number().positive().optional(),
+  minAge: z.number().int().min(0).max(120).nullable().optional(),
+  maxAge: z.number().int().min(0).max(120).nullable().optional(),
+  weightLimitKg: z.number().positive().max(300).nullable().optional(), // null = open/heaviest
 })
 export type CreateDivisionInput = z.infer<typeof CreateDivisionInput>
+
+export const UpdateDivisionInput = CreateDivisionInput.partial()
+export type UpdateDivisionInput = z.infer<typeof UpdateDivisionInput>
+
+// POST /api/events/:id/divisions/import-from-templates
+export const ImportDivisionsFromTemplatesInput = z.object({
+  templateKeys: z.array(z.string()).optional(), // omit = import every academy template
+})
+export type ImportDivisionsFromTemplatesInput = z.infer<typeof ImportDivisionsFromTemplatesInput>
 
 export const DivisionSchema = z.object({
   _id: z.string(),
   eventId: z.string(),
   name: z.string(),
-  gender: z.enum(['male', 'female', 'mixed']),
-  ageClass: z.string(),
-  weightLimitKg: z.number().positive().optional(),
+  minAge: z.number().int().nullable(),
+  maxAge: z.number().int().nullable(),
+  weightLimitKg: z.number().positive().nullable(),
+  sourceTemplateKey: z.string().optional(),
+  sourceGroupId: z.string().optional(),
   createdAt: z.string().datetime(),
 })
 export type Division = z.infer<typeof DivisionSchema>
+
+// POST /api/events/:id/entries
+export const CreateEventEntryInput = z.object({
+  divisionId: z.string(),
+  athleteId: z.string(),
+  declaredWeightKg: z.number().positive().max(300).optional(),
+  notes: z.string().max(500).optional(),
+})
+export type CreateEventEntryInput = z.infer<typeof CreateEventEntryInput>
+
+// PATCH /api/events/:id/entries/:eid/weighin
+export const RecordWeighInInput = z.object({
+  weightKg: z.number().positive().max(300),
+})
+export type RecordWeighInInput = z.infer<typeof RecordWeighInInput>
+
+// PATCH /api/events/:id/entries/:eid/confirm
+export const ConfirmEntryInput = z.object({
+  confirmedDivisionId: z.string().optional(), // omit = confirm into the current divisionId
+})
+export type ConfirmEntryInput = z.infer<typeof ConfirmEntryInput>
+
+// PATCH /api/events/:id/entries/:eid/withdraw
+export const WithdrawEntryInput = z.object({
+  reason: z.string().min(3).max(500),
+})
+export type WithdrawEntryInput = z.infer<typeof WithdrawEntryInput>
 
 export const EventEntrySchema = z.object({
   _id: z.string(),
