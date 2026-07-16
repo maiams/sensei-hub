@@ -9,12 +9,23 @@ export const EventEntryStatus = z.enum([
   'checked_in',   // present at venue
   'weighed_in',   // weigh-in done, category pending confirmation
   'confirmed',    // category confirmed, eligible for bracket
+  'disqualified', // weigh-in exceeded the division limit and the event's policy is to disqualify
   'withdrawn',    // pulled out
 ])
 export type EventEntryStatus = z.infer<typeof EventEntryStatus>
 
 export const RegistrationMethod = z.enum(['import', 'manual'])
 export type RegistrationMethod = z.infer<typeof RegistrationMethod>
+
+// How an event handles a weigh-in that exceeds the division's weightLimitKg:
+// 'reallocate' moves the athlete into the lightest sibling division (same
+// sourceGroupId) whose limit still fits the actual weight; 'disqualify' ends
+// the entry immediately. Reallocation only has a signal to work with for
+// divisions imported together from the same academy DivisionGroup — a
+// manually created division has no siblings, so 'reallocate' falls back to
+// disqualifying when no fitting target exists.
+export const OverweightPolicy = z.enum(['disqualify', 'reallocate'])
+export type OverweightPolicy = z.infer<typeof OverweightPolicy>
 
 // POST /api/events
 export const CreateEventInput = z.object({
@@ -23,6 +34,7 @@ export const CreateEventInput = z.object({
   description: z.string().optional(),
   eventDate: z.string().date(),
   venue: z.string().optional(),
+  overweightPolicy: OverweightPolicy.optional(), // defaults to 'disqualify'
 })
 export type CreateEventInput = z.infer<typeof CreateEventInput>
 
@@ -41,6 +53,7 @@ export const EventSchema = z.object({
   eventDate: z.string().date(),
   venue: z.string().optional(),
   status: EventStatus,
+  overweightPolicy: OverweightPolicy,
   createdBy: z.string(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
@@ -128,6 +141,7 @@ export const EventEntrySchema = z.object({
   confirmedWeightKg: z.number().positive().optional(),
   notes: z.string().optional(),
   withdrawnReason: z.string().optional(),
+  disqualifiedReason: z.string().optional(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 })

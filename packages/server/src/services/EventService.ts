@@ -19,6 +19,7 @@ export class EventService {
       description: input.description,
       eventDate: input.eventDate,
       venue: input.venue,
+      overweightPolicy: input.overweightPolicy,
       createdBy: ctx.userId,
     })
 
@@ -54,7 +55,7 @@ export class EventService {
     }
 
     const auditEntries: Array<{ fieldName: string; oldValue: unknown; newValue: unknown }> = []
-    const fields = ['name', 'description', 'eventDate', 'venue', 'status'] as const
+    const fields = ['name', 'description', 'eventDate', 'venue', 'status', 'overweightPolicy'] as const
     for (const field of fields) {
       const newValue = input[field]
       if (newValue === undefined) continue
@@ -95,6 +96,7 @@ export class EventService {
       eventDate: event.eventDate,
       venue: event.venue,
       status: event.status,
+      overweightPolicy: event.overweightPolicy,
       createdBy: event.createdBy.toString(),
       createdAt: event.createdAt.toISOString(),
       updatedAt: event.updatedAt.toISOString(),

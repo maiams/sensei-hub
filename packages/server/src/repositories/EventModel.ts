@@ -1,5 +1,5 @@
 import { Schema, model, type Types } from 'mongoose'
-import type { EventStatus } from '@sensei-hub/shared'
+import type { EventStatus, OverweightPolicy } from '@sensei-hub/shared'
 
 export interface EventDocument {
   _id: Types.ObjectId
@@ -9,6 +9,7 @@ export interface EventDocument {
   eventDate: string // YYYY-MM-DD
   venue?: string
   status: EventStatus
+  overweightPolicy: OverweightPolicy
   createdBy: Types.ObjectId
   createdAt: Date
   updatedAt: Date
@@ -26,6 +27,12 @@ const eventSchema = new Schema<EventDocument>(
       required: true,
       enum: ['draft', 'registration', 'in_progress', 'completed', 'cancelled'],
       default: 'draft',
+    },
+    overweightPolicy: {
+      type: String,
+      required: true,
+      enum: ['disqualify', 'reallocate'],
+      default: 'disqualify',
     },
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
   },

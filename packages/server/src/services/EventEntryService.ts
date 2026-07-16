@@ -1,6 +1,6 @@
 import { EventEntryModel, type EventEntryDocument } from '../repositories/EventEntryModel.js'
 import { EventModel } from '../repositories/EventModel.js'
-import { DivisionModel } from '../repositories/DivisionModel.js'
+import { DivisionModel, type DivisionDocument } from '../repositories/DivisionModel.js'
 import { AthleteModel } from '../repositories/AthleteModel.js'
 import { AuditLogModel } from '../repositories/AuditLogModel.js'
 import { WeightService } from './WeightService.js'
@@ -9,14 +9,17 @@ import type { CreateEventEntryInput, EventEntryStatus } from '@sensei-hub/shared
 
 // Explicit state machine — "incomplete" is reserved for Fase 3D's Excel import
 // (a row missing required fields); nothing creates that status yet, but the
-// transition out of it is defined for forward compatibility. "withdrawn" is
-// terminal and reachable from any non-terminal status, per product spec.
+// transition out of it is defined for forward compatibility. "withdrawn" and
+// "disqualified" are terminal and are not correctable through the state
+// machine (same accepted limitation as withdrawn since Fase 3A: undoing one
+// requires a new entry, not a status transition).
 const VALID_TRANSITIONS: Record<EventEntryStatus, EventEntryStatus[]> = {
   incomplete: ['registered', 'withdrawn'],
   registered: ['checked_in', 'withdrawn'],
-  checked_in: ['weighed_in', 'withdrawn'],
+  checked_in: ['weighed_in', 'disqualified', 'withdrawn'],
   weighed_in: ['confirmed', 'withdrawn'],
   confirmed: ['withdrawn'],
+  disqualified: [],
   withdrawn: [],
 }
 
@@ -93,25 +96,103 @@ export class EventEntryService {
 
   // Records the official weigh-in via WeightService (creating a real
   // WeightRecord tied to the athlete, same as the athlete-profile weigh-in
-  // flow). Exceeding the division's weightLimitKg is only a warning
-  // (`withinDivisionLimit: false`) — confirmEntry is what decides the final
-  // division, so operators aren't blocked mid-weigh-in.
+  // flow). If the weight is within the division's weightLimitKg, nothing
+  // else happens. If it exceeds the limit, the event's overweightPolicy
+  // decides the outcome:
+  //  - 'reallocate': move the entry into the lightest sibling division (same
+  //    sourceGroupId) whose limit still fits — still lands in "weighed_in",
+  //    so confirmEntry remains the operator's next step. If no sibling fits
+  //    (or the division has no sourceGroupId — a manually created division
+  //    has no siblings to search), falls back to disqualifying.
+  //  - 'disqualify': the entry moves straight to the terminal "disqualified"
+  //    status.
   async recordWeighIn(eventId: string, academyId: string, entryId: string, weightKg: number, ctx: AthleteCtx) {
-    const entry = await this.#findEntry(eventId, academyId, entryId)
+    const event = await this.#findEvent(eventId, academyId)
+    const entry = await EventEntryModel.findOne({ _id: entryId, eventId })
+    if (!entry) {
+      throw new EventEntryServiceError('Entry not found', 404)
+    }
     this.#assertTransition(entry.status, 'weighed_in')
 
     await this.#weightService.recordWeight(entry.athleteId.toString(), weightKg, 'manual', ctx, eventId)
 
     const division = await DivisionModel.findById(entry.divisionId)
-    const withinDivisionLimit = !division?.weightLimitKg || weightKg <= division.weightLimitKg
+    const overLimit = division?.weightLimitKg != null && weightKg > division.weightLimitKg
+
+    if (!overLimit) {
+      const oldStatus = entry.status
+      entry.status = 'weighed_in'
+      entry.confirmedWeightKg = weightKg
+      await entry.save()
+      await this.#auditStatusChange(entry._id, oldStatus, 'weighed_in', ctx)
+      return { ...this.#toDTO(entry), outcome: 'ok' as const }
+    }
+
+    if (event.overweightPolicy === 'reallocate' && division) {
+      const target = await this.#findReallocationTarget(eventId, division, weightKg)
+      if (target) {
+        const oldStatus = entry.status
+        const oldDivisionId = entry.divisionId
+        entry.status = 'weighed_in'
+        entry.confirmedWeightKg = weightKg
+        entry.divisionId = target._id
+        await entry.save()
+        await this.#auditStatusChange(entry._id, oldStatus, 'weighed_in', ctx)
+        await AuditLogModel.create({
+          userId: ctx.userId,
+          entityType: 'EventEntry',
+          entityId: entry._id,
+          action: 'update',
+          fieldName: 'divisionId',
+          oldValue: oldDivisionId.toString(),
+          newValue: target._id.toString(),
+          reason: `Peso acima do limite da divisão (${weightKg}kg > ${division.weightLimitKg}kg) — realocado automaticamente`,
+          sessionId: ctx.sessionId,
+          ip: ctx.ip,
+        })
+        return { ...this.#toDTO(entry), outcome: 'reallocated' as const }
+      }
+    }
 
     const oldStatus = entry.status
-    entry.status = 'weighed_in'
+    const reason = `Peso acima do limite da divisão (${weightKg}kg > ${division?.weightLimitKg}kg)`
+    entry.status = 'disqualified'
     entry.confirmedWeightKg = weightKg
+    entry.disqualifiedReason = reason
     await entry.save()
-    await this.#auditStatusChange(entry._id, oldStatus, 'weighed_in', ctx)
+    await AuditLogModel.create({
+      userId: ctx.userId,
+      entityType: 'EventEntry',
+      entityId: entry._id,
+      action: 'update',
+      fieldName: 'status',
+      oldValue: oldStatus,
+      newValue: 'disqualified',
+      reason,
+      sessionId: ctx.sessionId,
+      ip: ctx.ip,
+    })
+    return { ...this.#toDTO(entry), outcome: 'disqualified' as const }
+  }
 
-    return { ...this.#toDTO(entry), withinDivisionLimit }
+  // Only searches among divisions imported together from the same academy
+  // DivisionGroup (sourceGroupId) — that's the only reliable signal that two
+  // divisions represent weight brackets of the same category. Picks the
+  // lightest one that still fits the actual weight.
+  async #findReallocationTarget(eventId: string, fromDivision: DivisionDocument, weightKg: number) {
+    if (!fromDivision.sourceGroupId) return null
+    const candidates = await DivisionModel.find({
+      eventId,
+      sourceGroupId: fromDivision.sourceGroupId,
+      _id: { $ne: fromDivision._id },
+    })
+    const fitting = candidates.filter((d) => d.weightLimitKg == null || d.weightLimitKg >= weightKg)
+    fitting.sort((a, b) => {
+      if (a.weightLimitKg == null) return 1
+      if (b.weightLimitKg == null) return -1
+      return a.weightLimitKg - b.weightLimitKg
+    })
+    return fitting[0] ?? null
   }
 
   // Allows moving the athlete into a different division than originally
@@ -216,6 +297,7 @@ export class EventEntryService {
       confirmedWeightKg: entry.confirmedWeightKg,
       notes: entry.notes,
       withdrawnReason: entry.withdrawnReason,
+      disqualifiedReason: entry.disqualifiedReason,
       createdAt: entry.createdAt.toISOString(),
       updatedAt: entry.updatedAt.toISOString(),
     }

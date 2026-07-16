@@ -222,14 +222,14 @@ Isso substituiu por completo o design da v1 (6 grupos fixos derivados do enum `A
 
 **Nova ação — `POST /api/events/:id/divisions/import-from-templates`** (não estava no plano original, criada para integrar com o trabalho de Fase 2): expande `DivisionTemplate` × `DivisionGroup` × linha de categoria de peso em uma `Division` de evento por categoria (ex.: template "Adulto" com grupos Masculino/Feminino de 7 categorias cada gera 14 divisões). Body opcional `{ templateKeys?: string[] }` filtra quais templates importar; sem filtro importa todos. Não é idempotente (rodar duas vezes duplica) — aceitável porque o organizador normalmente importa uma vez e edita depois; documentado aqui como limitação conhecida, não corrigida por falta de necessidade agora.
 
-**`EventEntryService`** — máquina de estados implementada exatamente como planejado (`incomplete→registered→checked_in→weighed_in→confirmed`, `withdrawn` alcançável de qualquer estado não-terminal, transição inválida → 409):
-- `recordWeighIn` reaproveita `WeightService.recordWeight()` (cria `WeightRecord` real vinculado à atleta, mesmo fluxo do perfil) — retorna `withinDivisionLimit: boolean` como alerta, nunca bloqueia.
-- `confirmEntry` aceita `confirmedDivisionId` opcional pra mover a atleta pra outra divisão no momento da confirmação.
+**`EventEntryService`** — máquina de estados implementada exatamente como planejado (`incomplete→registered→checked_in→weighed_in→confirmed`, mais `disqualified` — ver adendo abaixo —, `withdrawn` alcançável de qualquer estado não-terminal, transição inválida → 409):
+- `recordWeighIn` reaproveita `WeightService.recordWeight()` (cria `WeightRecord` real vinculado à atleta, mesmo fluxo do perfil). O que acontece quando o peso excede `weightLimitKg` da divisão é decidido pela política do evento — ver adendo "Política de peso acima do limite" abaixo.
+- `confirmEntry` aceita `confirmedDivisionId` opcional pra mover a atleta pra outra divisão no momento da confirmação (override manual, independente de peso).
 - `withdrawEntry` exige `reason`.
 
 **Rotas:** exatamente as do plano original (`/api/events`, `/api/events/:id/divisions`, `/api/events/:id/entries` + as 4 transições), mais a rota de import acima. RBAC igual ao planejado: `event_manager+` pra criar/editar evento e divisão, `staff+` pra check-in/listagem/inscrição manual, `weigh_in_operator+` pra pesagem, `event_manager+` pra confirmar/retirar.
 
-**Testes:** 15 novos em `event.test.ts` (78 no total do pacote server) — CRUD de evento/divisão, import-from-templates (conta exata de divisões geradas), ciclo completo de inscrição, peso acima do limite não bloqueia, confirmação trocando de divisão, retirada de qualquer estado não-terminal + reason obrigatório, transição inválida (pular etapa) → 409, inscrição duplicada → 409, RBAC por rota.
+**Testes:** 15 novos em `event.test.ts` na versão original desta fase (78 no total do pacote server); +2 testes líquidos no adendo da política de peso (80 no total) — CRUD de evento/divisão, import-from-templates (conta exata de divisões geradas), ciclo completo de inscrição, confirmação trocando de divisão, retirada de qualquer estado não-terminal + reason obrigatório, transição inválida (pular etapa) → 409, inscrição duplicada → 409, RBAC por rota.
 
 **UI:** `/events` (lista), `/events/new` (criação), `/events/[id]` (detalhe — cabeçalho editável para `event_manager+`, seção de divisões com importar-do-padrão/criar/editar/apagar, seção de inscrições com busca de atleta + seleção de divisão + botões de ação condicionais por status/role). Modo leitura/edição calculado em `useEffect` (evita hydration mismatch, mesmo padrão já usado em `/settings/divisions`).
 
@@ -237,10 +237,26 @@ Isso substituiu por completo o design da v1 (6 grupos fixos derivados do enum `A
 
 **Bug encontrado e corrigido durante o teste manual:** a lista de inscrições sempre exibia o nome da divisão original (`entry.divisionId`), mesmo depois de `confirmEntry` mover a atleta para outra divisão via `confirmedDivisionId`. Corrigido em `EntriesSection` (`packages/web/src/app/events/[id]/page.tsx`) para preferir `entry.confirmedDivisionId` quando presente.
 
-**Limitação conhecida, não corrigida agora:** a UI calcula `withinDivisionLimit` no backend (peso acima do limite da divisão não bloqueia a pesagem) mas não exibe nenhum aviso visual disso ao operador — o peso é salvo silenciosamente. Fica anotado para quando a Fase 3B (brackets) ou uma revisão de UX da pesagem tocar essa tela.
-
 **Pendente da Fase 3A:**
 - [ ] Tornar `import-from-templates` idempotente se isso virar um problema real no uso (hoje não é, mas fica anotado)
+
+---
+
+### Adendo — Política de peso acima do limite (2026-07-16)
+
+Pedido do usuário: peso acima do limite da divisão não pode ser só um aviso ignorado — cada campeonato define sua própria regra: **realocar** a atleta automaticamente para a categoria correta, ou **desclassificar**. Substitui o comportamento anterior (`withinDivisionLimit: boolean`, nunca bloqueava).
+
+**Modelo:** `EventModel.overweightPolicy: 'disqualify' | 'reallocate'` (default `'disqualify'` — mais próximo da convenção usual de campeonato de judô), configurável na criação do evento e editável depois no cabeçalho. `EventEntryStatus` ganhou `'disqualified'` (terminal, igual a `withdrawn` — sem correção via máquina de estados, mesma limitação já aceita para retiradas). `EventEntryModel` ganhou `disqualifiedReason`.
+
+**Lógica em `recordWeighIn`** (`EventEntryService`): se o peso não excede o limite, nada muda (`outcome: 'ok'`). Se excede:
+- `reallocate`: busca, entre as divisões do mesmo evento que compartilham `sourceGroupId` (ou seja, vieram do mesmo `DivisionGroup` da academia — o único sinal confiável de "mesma categoria, brackets de peso diferentes", já que divisões são livres e não têm mais um campo de gênero/classe fixo), a de menor `weightLimitKg` que ainda comporte o peso real. Se achar, move `divisionId` da inscrição pra lá e mantém o fluxo em `weighed_in` (`confirmEntry` continua disponível). Se não achar — inclusive porque a divisão foi criada manualmente e não tem `sourceGroupId`, caso em que não há nenhum sinal de agrupamento pra buscar — cai automaticamente pra desclassificação.
+- `disqualify`: a inscrição vai direto para `disqualified`, com `disqualifiedReason` preenchido (ex.: "Peso acima do limite da divisão (95kg > 90kg)").
+
+Toda mudança automática de divisão ou desclassificação gera log de auditoria com o motivo.
+
+**UI:** seletor de política no formulário de criar evento e no cabeçalho do evento (`event_manager+`); status "Desclassificada" com motivo exibido na lista de inscrições; mensagem inline após registrar pesagem informando se a atleta foi realocada ou desclassificada.
+
+**Testado:** 80 testes do server passam (2 líquidos a mais: reescreveu os 2 testes que dependiam do comportamento antigo de "nunca bloqueia" e adicionou o caminho de realocação bem-sucedida + o de fallback pra desclassificação). Testado manualmente no navegador: política "realocar" movendo a atleta de "Ligeiro" pra "Meio Leve" com mensagem inline correta; política "desclassificar" (default) terminando a inscrição com motivo visível e sem botões de ação residuais.
 
 ---
 

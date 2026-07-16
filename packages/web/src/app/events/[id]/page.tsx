@@ -9,6 +9,8 @@ import {
   EVENT_ENTRY_STATUS_LABELS,
   EVENT_STATUS_LABELS,
   EVENT_STATUS_OPTIONS,
+  OVERWEIGHT_POLICY_LABELS,
+  OVERWEIGHT_POLICY_OPTIONS,
   formatDate,
   translateApiError,
 } from '../../../lib/labels'
@@ -20,6 +22,7 @@ interface EventDTO {
   eventDate: string
   venue?: string
   status: string
+  overweightPolicy: string
 }
 
 interface DivisionDTO {
@@ -123,6 +126,7 @@ function EventHeader({ event, canManage, onChanged }: { event: EventDTO; canMana
   const [eventDate, setEventDate] = useState(event.eventDate)
   const [venue, setVenue] = useState(event.venue ?? '')
   const [status, setStatus] = useState(event.status)
+  const [overweightPolicy, setOverweightPolicy] = useState(event.overweightPolicy)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -132,7 +136,7 @@ function EventHeader({ event, canManage, onChanged }: { event: EventDTO; canMana
     try {
       await apiFetch(`/events/${event.id}`, {
         method: 'PATCH',
-        body: JSON.stringify({ name, eventDate, venue: venue || undefined, status }),
+        body: JSON.stringify({ name, eventDate, venue: venue || undefined, status, overweightPolicy }),
       })
       onChanged()
     } catch (err) {
@@ -154,6 +158,9 @@ function EventHeader({ event, canManage, onChanged }: { event: EventDTO; canMana
         <p className="mt-1 text-sm text-slate-400">
           {formatDate(event.eventDate)}
           {event.venue ? ` · ${event.venue}` : ''}
+        </p>
+        <p className="mt-1 text-sm text-slate-500">
+          Peso acima do limite: {OVERWEIGHT_POLICY_LABELS[event.overweightPolicy] ?? event.overweightPolicy}
         </p>
       </section>
     )
@@ -195,6 +202,20 @@ function EventHeader({ event, canManage, onChanged }: { event: EventDTO; canMana
             className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white"
           >
             {EVENT_STATUS_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="sm:col-span-2">
+          <label className="mb-1 block text-xs text-slate-500">Peso acima do limite da categoria</label>
+          <select
+            value={overweightPolicy}
+            onChange={(e) => setOverweightPolicy(e.target.value)}
+            className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white"
+          >
+            {OVERWEIGHT_POLICY_OPTIONS.map((o) => (
               <option key={o.value} value={o.value}>
                 {o.label}
               </option>
@@ -545,6 +566,7 @@ interface EntryDTO {
   declaredWeightKg?: number
   confirmedWeightKg?: number
   withdrawnReason?: string
+  disqualifiedReason?: string
 }
 
 interface AthleteListItem {
@@ -834,6 +856,7 @@ function EntryRow({
   const [showWithdraw, setShowWithdraw] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [weighInOutcome, setWeighInOutcome] = useState<string | null>(null)
 
   async function run(action: () => Promise<unknown>) {
     setLoading(true)
@@ -852,12 +875,20 @@ function EntryRow({
     run(() => apiFetch(`/events/${eventId}/entries/${entry.id}/checkin`, { method: 'PATCH' }))
 
   const handleWeighIn = () =>
-    run(() =>
-      apiFetch(`/events/${eventId}/entries/${entry.id}/weighin`, {
-        method: 'PATCH',
-        body: JSON.stringify({ weightKg: Number(weighInValue) }),
-      }),
-    ).then(() => setShowWeighIn(false))
+    run(async () => {
+      const result = await apiFetch<{ outcome: 'ok' | 'reallocated' | 'disqualified' }>(
+        `/events/${eventId}/entries/${entry.id}/weighin`,
+        { method: 'PATCH', body: JSON.stringify({ weightKg: Number(weighInValue) }) },
+      )
+      if (result.outcome === 'reallocated') {
+        setWeighInOutcome('Peso acima do limite: atleta realocada automaticamente para a categoria correta.')
+      } else if (result.outcome === 'disqualified') {
+        setWeighInOutcome('Peso acima do limite: atleta desclassificada desta divisão.')
+      } else {
+        setWeighInOutcome(null)
+      }
+      return result
+    }).then(() => setShowWeighIn(false))
 
   const handleConfirm = () =>
     run(() =>
@@ -891,6 +922,10 @@ function EntryRow({
         <p className="mt-1 text-sm text-slate-400">Pesagem: {entry.confirmedWeightKg}kg</p>
       )}
       {entry.withdrawnReason && <p className="mt-1 text-sm text-amber-400">Retirada: {entry.withdrawnReason}</p>}
+      {entry.disqualifiedReason && (
+        <p className="mt-1 text-sm text-red-400">Desclassificada: {entry.disqualifiedReason}</p>
+      )}
+      {weighInOutcome && <p className="mt-2 text-sm text-amber-400">{weighInOutcome}</p>}
 
       {error && <p className="mt-2 text-sm text-red-400">{error}</p>}
 
@@ -983,7 +1018,7 @@ function EntryRow({
           </div>
         )}
 
-        {canManage && entry.status !== 'withdrawn' && !showWithdraw && (
+        {canManage && entry.status !== 'withdrawn' && entry.status !== 'disqualified' && !showWithdraw && (
           <button
             type="button"
             onClick={() => setShowWithdraw(true)}

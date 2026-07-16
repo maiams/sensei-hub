@@ -106,6 +106,7 @@ interface EntryDTO {
   confirmedDivisionId?: string
   confirmedWeightKg?: number
   withdrawnReason?: string
+  disqualifiedReason?: string
 }
 
 async function createDivision(token: string, eventId: string, overrides: Record<string, unknown> = {}) {
@@ -305,10 +306,10 @@ describe('Event entries', () => {
       payload: { weightKg: 89.5 },
     })
     expect(weighedIn.statusCode).toBe(200)
-    const weighedBody = weighedIn.json<EntryDTO & { withinDivisionLimit: boolean }>()
+    const weighedBody = weighedIn.json<EntryDTO & { outcome: string }>()
     expect(weighedBody.status).toBe('weighed_in')
     expect(weighedBody.confirmedWeightKg).toBe(89.5)
-    expect(weighedBody.withinDivisionLimit).toBe(true)
+    expect(weighedBody.outcome).toBe('ok')
 
     // weigh-in should have created a real WeightRecord visible on the athlete
     const weights = await app.inject({
@@ -329,9 +330,9 @@ describe('Event entries', () => {
     expect(confirmedBody.confirmedDivisionId).toBe(division.id)
   })
 
-  it('weigh-in over the division limit is flagged but not blocked', async () => {
+  it('weigh-in over the division limit disqualifies the entry under the default policy', async () => {
     const token = await setupAdmin()
-    const event = await createEvent(token)
+    const event = await createEvent(token) // overweightPolicy defaults to 'disqualify'
     const division = await createDivision(token, event.id, { weightLimitKg: 90 })
     const athlete = await createAthlete(token)
     const entry = (
@@ -355,12 +356,115 @@ describe('Event entries', () => {
       payload: { weightKg: 95 },
     })
     expect(res.statusCode).toBe(200)
-    const body = res.json<EntryDTO & { withinDivisionLimit: boolean }>()
-    expect(body.withinDivisionLimit).toBe(false)
-    expect(body.status).toBe('weighed_in') // not blocked
+    const body = res.json<EntryDTO & { outcome: string }>()
+    expect(body.outcome).toBe('disqualified')
+    expect(body.status).toBe('disqualified')
+    expect(body.disqualifiedReason).toContain('95kg > 90kg')
+
+    // disqualified is terminal
+    const again = await app.inject({
+      method: 'PATCH',
+      url: `/api/events/${event.id}/entries/${entry.id}/confirm`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: {},
+    })
+    expect(again.statusCode).toBe(409)
   })
 
-  it('confirm can move the entry into a different division', async () => {
+  it('reallocate policy moves the entry into the lightest sibling division that fits the weight', async () => {
+    const token = await setupAdmin()
+    await app.inject({
+      method: 'POST',
+      url: '/api/division-templates/load-preset',
+      headers: { authorization: `Bearer ${token}` },
+    })
+    const event = await createEvent(token, { overweightPolicy: 'reallocate' })
+    await app.inject({
+      method: 'POST',
+      url: `/api/events/${event.id}/divisions/import-from-templates`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { templateKeys: ['adulto'] },
+    })
+    const divisions = (
+      await app.inject({
+        method: 'GET',
+        url: `/api/events/${event.id}/divisions`,
+        headers: { authorization: `Bearer ${token}` },
+      })
+    ).json<DivisionDTO[]>()
+    const ligeiro = divisions.find((d) => d.name.includes('Masculino — Ligeiro'))!
+    const meioLeve = divisions.find((d) => d.name.includes('Masculino — Meio Leve'))!
+    expect(ligeiro.weightLimitKg).toBe(60)
+    expect(meioLeve.weightLimitKg).toBe(66)
+
+    const athlete = await createAthlete(token)
+    const entry = (
+      await app.inject({
+        method: 'POST',
+        url: `/api/events/${event.id}/entries`,
+        headers: { authorization: `Bearer ${token}` },
+        payload: { divisionId: ligeiro.id, athleteId: athlete.id },
+      })
+    ).json<EntryDTO>()
+    await app.inject({
+      method: 'PATCH',
+      url: `/api/events/${event.id}/entries/${entry.id}/checkin`,
+      headers: { authorization: `Bearer ${token}` },
+    })
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/api/events/${event.id}/entries/${entry.id}/weighin`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { weightKg: 65 },
+    })
+    const body = res.json<EntryDTO & { outcome: string }>()
+    expect(body.outcome).toBe('reallocated')
+    expect(body.status).toBe('weighed_in') // still in the flow, not disqualified
+    expect(body.divisionId).toBe(meioLeve.id)
+
+    // confirmEntry remains available after a reallocation
+    const confirmed = await app.inject({
+      method: 'PATCH',
+      url: `/api/events/${event.id}/entries/${entry.id}/confirm`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: {},
+    })
+    expect(confirmed.json<EntryDTO>().status).toBe('confirmed')
+    expect(confirmed.json<EntryDTO>().confirmedDivisionId).toBe(meioLeve.id)
+  })
+
+  it('reallocate policy falls back to disqualify when the division has no siblings (manually created)', async () => {
+    const token = await setupAdmin()
+    const event = await createEvent(token, { overweightPolicy: 'reallocate' })
+    const division = await createDivision(token, event.id, { weightLimitKg: 90 })
+    const athlete = await createAthlete(token)
+    const entry = (
+      await app.inject({
+        method: 'POST',
+        url: `/api/events/${event.id}/entries`,
+        headers: { authorization: `Bearer ${token}` },
+        payload: { divisionId: division.id, athleteId: athlete.id },
+      })
+    ).json<EntryDTO>()
+    await app.inject({
+      method: 'PATCH',
+      url: `/api/events/${event.id}/entries/${entry.id}/checkin`,
+      headers: { authorization: `Bearer ${token}` },
+    })
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/api/events/${event.id}/entries/${entry.id}/weighin`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { weightKg: 95 },
+    })
+    const body = res.json<EntryDTO & { outcome: string }>()
+    expect(body.outcome).toBe('disqualified')
+    expect(body.status).toBe('disqualified')
+  })
+
+  it('confirm can move the entry into a different division (manual override, independent of weight)', async () => {
     const token = await setupAdmin()
     const event = await createEvent(token)
     const divisionA = await createDivision(token, event.id, { name: 'Médio', weightLimitKg: 90 })
@@ -383,7 +487,7 @@ describe('Event entries', () => {
       method: 'PATCH',
       url: `/api/events/${event.id}/entries/${entry.id}/weighin`,
       headers: { authorization: `Bearer ${token}` },
-      payload: { weightKg: 95 },
+      payload: { weightKg: 88 }, // within divisionA's limit — policy doesn't kick in
     })
 
     const confirmed = await app.inject({

@@ -101,8 +101,19 @@ export const EVENT_ENTRY_STATUS_LABELS: Record<string, string> = {
   checked_in: 'Check-in feito',
   weighed_in: 'Pesada',
   confirmed: 'Confirmada',
+  disqualified: 'Desclassificada',
   withdrawn: 'Retirada',
 }
+
+export const OVERWEIGHT_POLICY_LABELS: Record<string, string> = {
+  disqualify: 'Desclassificar automaticamente',
+  reallocate: 'Realocar para a categoria correta',
+}
+
+export const OVERWEIGHT_POLICY_OPTIONS = Object.entries(OVERWEIGHT_POLICY_LABELS).map(([value, label]) => ({
+  value,
+  label,
+}))
 
 export function formatDate(isoDate: string): string {
   if (!isoDate) return ''

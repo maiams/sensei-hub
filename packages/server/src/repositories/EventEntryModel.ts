@@ -15,6 +15,7 @@ export interface EventEntryDocument {
   confirmedWeightKg?: number
   notes?: string
   withdrawnReason?: string
+  disqualifiedReason?: string
   createdAt: Date
   updatedAt: Date
 }
@@ -31,13 +32,14 @@ const eventEntrySchema = new Schema<EventEntryDocument>(
     status: {
       type: String,
       required: true,
-      enum: ['incomplete', 'registered', 'checked_in', 'weighed_in', 'confirmed', 'withdrawn'],
+      enum: ['incomplete', 'registered', 'checked_in', 'weighed_in', 'confirmed', 'disqualified', 'withdrawn'],
       default: 'registered',
     },
     declaredWeightKg: { type: Number },
     confirmedWeightKg: { type: Number },
     notes: { type: String, maxlength: 500 },
     withdrawnReason: { type: String, maxlength: 500 },
+    disqualifiedReason: { type: String, maxlength: 500 },
   },
   { timestamps: true },
 )

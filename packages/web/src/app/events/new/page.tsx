@@ -4,7 +4,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { apiFetch, ApiError, isLoggedIn } from '../../../lib/api'
-import { translateApiError } from '../../../lib/labels'
+import { OVERWEIGHT_POLICY_OPTIONS, translateApiError } from '../../../lib/labels'
 
 export default function NewEventPage() {
   const router = useRouter()
@@ -12,6 +12,7 @@ export default function NewEventPage() {
   const [eventDate, setEventDate] = useState('')
   const [venue, setVenue] = useState('')
   const [description, setDescription] = useState('')
+  const [overweightPolicy, setOverweightPolicy] = useState('disqualify')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -31,6 +32,7 @@ export default function NewEventPage() {
           eventDate,
           venue: venue || undefined,
           description: description || undefined,
+          overweightPolicy,
         }),
       })
       router.replace(`/events/${event.id}`)
@@ -105,6 +107,27 @@ export default function NewEventPage() {
               onChange={(e) => setDescription(e.target.value)}
               className="w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-2.5 text-white placeholder-slate-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
+          </div>
+
+          <div>
+            <label className="mb-1 block text-sm font-medium text-slate-300" htmlFor="overweightPolicy">
+              Peso acima do limite da categoria
+            </label>
+            <select
+              id="overweightPolicy"
+              value={overweightPolicy}
+              onChange={(e) => setOverweightPolicy(e.target.value)}
+              className="w-full rounded-lg border border-slate-700 bg-slate-800 px-4 py-2.5 text-white focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            >
+              {OVERWEIGHT_POLICY_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-slate-500">
+              O que acontece na pesagem quando a atleta excede o limite da divisão.
+            </p>
           </div>
 
           {error && (
