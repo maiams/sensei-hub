@@ -5,7 +5,7 @@ import type { WeightSource } from '@sensei-hub/shared'
 import type { AuthCtx } from '@sensei-hub/core-server'
 
 export class WeightService {
-  async recordWeight(athleteId: string, weightKg: number, source: WeightSource, ctx: AuthCtx, eventId?: string) {
+  async recordWeight(athleteId: string, weightKg: number, source: WeightSource, ctx: AuthCtx) {
     const athlete = await AthleteModel.findOne({ _id: athleteId, academyId: ctx.academyId })
     if (!athlete) {
       throw new WeightServiceError('Athlete not found', 404)
@@ -13,7 +13,6 @@ export class WeightService {
 
     const record = await WeightRecordModel.create({
       athleteId,
-      eventId,
       weightKg,
       source,
       operatorId: ctx.userId,
@@ -62,7 +61,6 @@ export class WeightService {
     // Append-only correction — the original record is never mutated or deleted.
     const corrected = await WeightRecordModel.create({
       athleteId: original.athleteId,
-      eventId: original.eventId,
       weightKg: newWeightKg,
       source: 'corrected',
       operatorId: ctx.userId,
@@ -94,7 +92,6 @@ export class WeightService {
     return {
       id: record._id.toString(),
       athleteId: record.athleteId.toString(),
-      eventId: record.eventId?.toString(),
       weightKg: record.weightKg,
       source: record.source,
       operatorId: record.operatorId.toString(),

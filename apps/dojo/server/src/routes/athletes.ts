@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { CreateAthleteInput, UpdateAthleteInput, CreateBeltRecordInput, RecordWeightInput, CorrectWeightInput, CreateGuardianInput } from '@dojo/shared'
 import { AthleteService, AthleteServiceError } from '../services/AthleteService.js'
 import { WeightService, WeightServiceError } from '../services/WeightService.js'
+import { ExportService, ExportServiceError } from '../services/ExportService.js'
 import { authenticate } from '@sensei-hub/core-server'
 import { authorize } from '@sensei-hub/core-server'
 
@@ -22,13 +23,29 @@ const ListAthletesQuery = z.object({
 export async function athleteRoutes(app: FastifyInstance): Promise<void> {
   const athleteService = new AthleteService()
   const weightService = new WeightService()
+  const exportService = new ExportService()
 
   function handleError(err: unknown, reply: import('fastify').FastifyReply) {
-    if (err instanceof AthleteServiceError || err instanceof WeightServiceError) {
+    if (err instanceof AthleteServiceError || err instanceof WeightServiceError || err instanceof ExportServiceError) {
       return reply.status(err.statusCode).send({ error: err.message })
     }
     throw err
   }
+
+  // ─── Export para campeonato ────────────────────────────────────────────────
+  // Must be registered before /athletes/:id so "export" isn't captured as :id.
+
+  app.get('/athletes/export', { preHandler: [authenticate, authorize('staff')] }, async (request, reply) => {
+    try {
+      const buffer = await exportService.buildAthleteWorkbook(request.authUser.academyId)
+      return reply
+        .header('content-type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        .header('content-disposition', 'attachment; filename="atletas-campeonato.xlsx"')
+        .send(buffer)
+    } catch (err) {
+      return handleError(err, reply)
+    }
+  })
 
   // ─── Athlete CRUD ──────────────────────────────────────────────────────────
 
@@ -154,19 +171,13 @@ export async function athleteRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(400).send({ error: 'Validation failed', details: parsed.error.flatten() })
     }
     try {
-      const record = await weightService.recordWeight(
-        id,
-        parsed.data.weightKg,
-        'manual',
-        {
-          userId: request.authUser.id,
-          academyId: request.authUser.academyId,
-          role: request.authUser.role,
-          sessionId: request.id,
-          ip: request.ip,
-        },
-        parsed.data.eventId,
-      )
+      const record = await weightService.recordWeight(id, parsed.data.weightKg, 'manual', {
+        userId: request.authUser.id,
+        academyId: request.authUser.academyId,
+        role: request.authUser.role,
+        sessionId: request.id,
+        ip: request.ip,
+      })
       return reply.status(201).send(record)
     } catch (err) {
       return handleError(err, reply)

@@ -1,9 +1,6 @@
 import { z } from 'zod'
 import { Belt, Gender, WeightSource } from '@sensei-hub/shared'
 
-export const AthleteScope = z.enum(['academy', 'event-only'])
-export type AthleteScope = z.infer<typeof AthleteScope>
-
 export const AthleteStatus = z.enum(['active', 'inactive', 'suspended', 'pending'])
 export type AthleteStatus = z.infer<typeof AthleteStatus>
 
@@ -20,11 +17,8 @@ const AthleteWritableFields = {
   currentBelt: Belt,
   federationNumber: z.string().optional(), // FPJ; legacy field name kept for stored-data compatibility
   zempoNumber: z.string().optional(),       // national CBJ registration in Zempo
-  // Home club/academy label — mainly for scope:'event-only' athletes imported
-  // from a visiting academy (Fase 3D). Distinct from `academyId`, which is
-  // always the single installed academy in this local-first deployment; the
-  // bracket engine's same-club separation reads this field when present, or
-  // falls back to `academyId` for the host academy's own athletes.
+  // Home club/academy label shown on exports — distinct from `academyId`,
+  // which is always the single installed academy in this deployment.
   clubName: z.string().max(120).optional(),
   hasMedicalRestriction: z.boolean().default(false),
   medicalNotes: z.string().max(2000).optional(),   // select: false at the model level; coach+ only
@@ -67,8 +61,6 @@ export type GuardianDTO = z.infer<typeof GuardianDTO>
 // POST /api/athletes
 export const CreateAthleteInput = z.object({
   academyId: z.string(),
-  scope: AthleteScope.default('academy'),
-  eventOnlyEventId: z.string().optional(),
   guardian: CreateGuardianInput.optional(),   // required by the service when the athlete is a minor
   ...AthleteWritableFields,
 })
@@ -82,8 +74,6 @@ export type UpdateAthleteInput = z.infer<typeof UpdateAthleteInput>
 export const AthleteDTO = z.object({
   _id: z.string(),
   academyId: z.string(),
-  scope: AthleteScope,
-  eventOnlyEventId: z.string().optional(),
   status: AthleteStatus,
   enrollmentNumber: z.string(),
   fullName: z.string(),
@@ -144,7 +134,6 @@ export type BeltRecordDTO = z.infer<typeof BeltRecordDTO>
 // POST /api/athletes/:id/weights
 export const RecordWeightInput = z.object({
   weightKg: z.number().positive().max(300),
-  eventId: z.string().optional(),
 })
 export type RecordWeightInput = z.infer<typeof RecordWeightInput>
 
@@ -158,7 +147,6 @@ export type CorrectWeightInput = z.infer<typeof CorrectWeightInput>
 export const WeightRecordDTO = z.object({
   _id: z.string(),
   athleteId: z.string(),
-  eventId: z.string().optional(),
   weightKg: z.number().positive(),
   source: WeightSource,
   operatorId: z.string(),

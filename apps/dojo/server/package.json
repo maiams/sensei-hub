@@ -1,0 +1,44 @@
+{
+  "name": "@dojo/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@fastify/cors": "^10.0.2",
+    "@fastify/jwt": "^10.1.0",
+    "@fastify/multipart": "^10.1.0",
+    "@fastify/websocket": "^11.0.2",
+    "@dojo/shared": "workspace:*",
+    "@sensei-hub/core-server": "workspace:*",
+    "@sensei-hub/shared": "workspace:*",
+    "bcryptjs": "^3.0.3",
+    "fastify": "^5.4.0",
+    "mongodb": "^6.20.0",
+    "mongoose": "^8.16.1",
+    "multicast-dns": "^7.2.5",
+    "xlsx": "^0.18.5",
+    "zod": "^3.25.67"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^3.0.0",
+    "@types/multicast-dns": "^7.2.4",
+    "@types/node": "^24.0.10",
+    "mongodb-memory-server": "^11.2.0",
+    "tsx": "^4.20.3",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
+  }
+}

@@ -9,52 +9,22 @@ import { ImportJobModel, type ImportJobDocument } from '../repositories/ImportJo
 import { AuditLogModel } from '@sensei-hub/core-server'
 import { CompetitorService, isMinor } from './CompetitorService.js'
 import type { AuthCtx } from '@sensei-hub/core-server'
-import { isValidCPF, type Belt, type Gender } from '@sensei-hub/shared'
+import { isValidCPF, BELT_LABEL_PT, ATHLETE_SHEET_HEADERS, type Belt, type Gender } from '@sensei-hub/shared'
 import { type ImportRowError } from '@arena/shared'
 
-// Fixed column order (A–N) — position matters, header text is a label only.
-// No "categoria" column: which Division the athlete lands in is derived from
-// age + weight + gender against the event's own divisions (see matchDivision
-// below), same as how a real weigh-in table sorts athletes — the operator
-// filling the spreadsheet shouldn't have to know the event's division names.
-const TEMPLATE_HEADERS = [
-  'nome_completo',
-  'nome_preferido',
-  'academia',
-  'data_nascimento',
-  'genero',
-  'faixa',
-  'peso_declarado_kg',
-  'cpf',
-  'email',
-  'telefone',
-  'responsavel_nome',
-  'responsavel_telefone',
-  'termos_aceitos',
-  'observacoes',
-]
+// Column order comes from the shared dojo→arena contract. No "categoria"
+// column: which Division the athlete lands in is derived from age + weight +
+// gender against the event's own divisions (see matchDivision below), same as
+// how a real weigh-in table sorts athletes.
+const TEMPLATE_HEADERS = [...ATHLETE_SHEET_HEADERS]
 
+// Derived from the shared canonical labels (the dojo export writes them), so
+// the two products cannot drift; plus lenient aliases people actually type.
 const BELT_MAP: Record<string, Belt> = {
-  branca: 'white',
-  bordo: 'burgundy',
-  cinza: 'gray',
-  azul: 'blue',
-  amarela: 'yellow',
-  laranja: 'orange',
-  verde: 'green',
-  roxa: 'purple',
-  marrom: 'brown',
+  ...Object.fromEntries(
+    (Object.entries(BELT_LABEL_PT) as Array<[Belt, string]>).map(([belt, label]) => [normalizeBelt(label), belt]),
+  ),
   preta: 'black-1dan',
-  'preta 1 dan': 'black-1dan',
-  'preta 2 dan': 'black-2dan',
-  'preta 3 dan': 'black-3dan',
-  'preta 4 dan': 'black-4dan',
-  'preta 5 dan': 'black-5dan',
-  'coral 6 dan': 'coral-6dan',
-  'coral 7 dan': 'coral-7dan',
-  'coral 8 dan': 'coral-8dan',
-  'vermelha 9 dan': 'red-9dan',
-  'vermelha 10 dan': 'red-10dan',
 }
 
 interface ParsedRow {

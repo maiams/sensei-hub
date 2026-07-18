@@ -13,8 +13,13 @@ if (process.platform !== SUPPORTED_PLATFORM) {
   process.exit(1)
 }
 
+// Qual produto subir: `pnpm dev:run [dojo|arena]` (default: arena, que tem a
+// maior superfície de API enquanto o web ainda é o monolito da Fase <E5).
+const product = process.argv[2] === 'dojo' ? 'dojo' : 'arena'
+const serverFilter = product === 'dojo' ? '@dojo/server' : '@arena/server'
+
 const requireFromServer = createRequire(
-  new URL('../packages/server/package.json', import.meta.url),
+  new URL(`../apps/${product}/server/package.json`, import.meta.url),
 )
 const { MongoMemoryReplSet } = requireFromServer('mongodb-memory-server')
 
@@ -109,7 +114,7 @@ try {
   const mongodbUri = replicaSet.getUri('senseihub-dev')
   console.log(`[dev:run] MongoDB pronto: ${mongodbUri}`)
 
-  startPackage('servidor', '@sensei-hub/server', { MONGODB_URI: mongodbUri })
+  startPackage('servidor', serverFilter, { MONGODB_URI: mongodbUri })
   startPackage('web', '@sensei-hub/web')
 
   console.log('[dev:run] Aplicacao iniciando em http://localhost:3000')

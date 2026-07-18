@@ -54,8 +54,6 @@ export class AthleteService {
           [
             {
               academyId: ctx.academyId,
-              scope: athleteFields.scope ?? 'academy',
-              eventOnlyEventId: athleteFields.eventOnlyEventId,
               enrollmentNumber,
               fullName: athleteFields.fullName,
               preferredName: athleteFields.preferredName,
@@ -363,8 +361,6 @@ export class AthleteService {
     return {
       id: athlete._id.toString(),
       academyId: athlete.academyId.toString(),
-      scope: athlete.scope,
-      eventOnlyEventId: athlete.eventOnlyEventId?.toString(),
       status: athlete.status,
       enrollmentNumber: athlete.enrollmentNumber,
       fullName: athlete.fullName,

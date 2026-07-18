@@ -4,7 +4,6 @@ import type { WeightSource } from '@sensei-hub/shared'
 export interface WeightRecordDocument {
   _id: Types.ObjectId
   athleteId: Types.ObjectId
-  eventId?: Types.ObjectId
   weightKg: number
   source: WeightSource
   operatorId: Types.ObjectId
@@ -20,7 +19,6 @@ export interface WeightRecordDocument {
 const weightRecordSchema = new Schema<WeightRecordDocument>(
   {
     athleteId: { type: Schema.Types.ObjectId, ref: 'Athlete', required: true },
-    eventId: { type: Schema.Types.ObjectId, ref: 'Event' },
     weightKg: { type: Number, required: true, min: 0, max: 300 },
     source: { type: String, required: true, enum: ['manual', 'scale', 'import', 'corrected'] },
     operatorId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
@@ -32,6 +30,5 @@ const weightRecordSchema = new Schema<WeightRecordDocument>(
 )
 
 weightRecordSchema.index({ athleteId: 1, recordedAt: -1 })
-weightRecordSchema.index({ eventId: 1, recordedAt: -1 }, { sparse: true })
 
 export const WeightRecordModel = model<WeightRecordDocument>('WeightRecord', weightRecordSchema)
