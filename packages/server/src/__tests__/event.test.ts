@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest'
-import { connectTestDb, closeTestDb, clearTestDb } from './helpers/db.js'
+import { connectTestDb, closeTestDb, clearTestDb } from '@sensei-hub/core-server/testing'
 import { buildApp } from '../app.js'
 import type { FastifyInstance } from 'fastify'
 

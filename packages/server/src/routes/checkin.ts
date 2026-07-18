@@ -2,8 +2,8 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { CheckInInput, UndoCheckInInput } from '@sensei-hub/shared'
 import { CheckInService, CheckInServiceError } from '../services/CheckInService.js'
 import { scaleAdapter } from '../adapters/ScaleAdapter.js'
-import { authenticate } from '../middleware/authenticate.js'
-import { authorize } from '../middleware/authorize.js'
+import { authenticate } from '@sensei-hub/core-server'
+import { authorize } from '@sensei-hub/core-server'
 
 export async function checkInRoutes(app: FastifyInstance): Promise<void> {
   const service = new CheckInService()

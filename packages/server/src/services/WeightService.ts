@@ -1,11 +1,11 @@
 import { AthleteModel } from '../repositories/AthleteModel.js'
 import { WeightRecordModel, type WeightRecordDocument } from '../repositories/WeightRecordModel.js'
-import { AuditLogModel } from '../repositories/AuditLogModel.js'
+import { AuditLogModel } from '@sensei-hub/core-server'
 import type { WeightSource } from '@sensei-hub/shared'
-import type { AthleteCtx } from './AthleteService.js'
+import type { AuthCtx } from '@sensei-hub/core-server'
 
 export class WeightService {
-  async recordWeight(athleteId: string, weightKg: number, source: WeightSource, ctx: AthleteCtx, eventId?: string) {
+  async recordWeight(athleteId: string, weightKg: number, source: WeightSource, ctx: AuthCtx, eventId?: string) {
     const athlete = await AthleteModel.findOne({ _id: athleteId, academyId: ctx.academyId })
     if (!athlete) {
       throw new WeightServiceError('Athlete not found', 404)
@@ -44,7 +44,7 @@ export class WeightService {
     return records.map((r) => this.#toDTO(r))
   }
 
-  async correctWeight(originalRecordId: string, newWeightKg: number, reason: string, ctx: AthleteCtx) {
+  async correctWeight(originalRecordId: string, newWeightKg: number, reason: string, ctx: AuthCtx) {
     if (!reason || reason.trim().length === 0) {
       throw new WeightServiceError('Correction reason is required', 400)
     }

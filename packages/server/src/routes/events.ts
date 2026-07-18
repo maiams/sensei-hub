@@ -19,8 +19,8 @@ import { EventService, EventServiceError } from '../services/EventService.js'
 import { DivisionService, DivisionServiceError } from '../services/DivisionService.js'
 import { EventEntryService, EventEntryServiceError } from '../services/EventEntryService.js'
 import { BracketService, BracketServiceError } from '../services/BracketService.js'
-import { authenticate } from '../middleware/authenticate.js'
-import { authorize } from '../middleware/authorize.js'
+import { authenticate } from '@sensei-hub/core-server'
+import { authorize } from '@sensei-hub/core-server'
 
 const CreateEventBody = CreateEventInput.omit({ hostAcademyId: true })
 

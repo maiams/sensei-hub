@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest'
-import { connectTestDb, closeTestDb, clearTestDb } from './helpers/db.js'
+import { connectTestDb, closeTestDb, clearTestDb } from '@sensei-hub/core-server/testing'
 import { buildApp } from '../app.js'
 import type { FastifyInstance } from 'fastify'
 
@@ -624,7 +624,7 @@ describe('Match rules (matchRules)', () => {
     const token = await setupAdmin()
     // Simulate a pre-existing document without matchRules by writing directly.
     const { DivisionTemplateModel } = await import('../repositories/DivisionTemplateModel.js')
-    const { AcademyModel } = await import('../repositories/AcademyModel.js')
+    const { AcademyModel } = await import('@sensei-hub/core-server')
     const academy = await AcademyModel.findOne()
     await DivisionTemplateModel.create({
       academyId: academy!._id,

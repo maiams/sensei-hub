@@ -1,8 +1,8 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import multipart from '@fastify/multipart'
 import { ImportService, ImportServiceError } from '../services/ImportService.js'
-import { authenticate } from '../middleware/authenticate.js'
-import { authorize } from '../middleware/authorize.js'
+import { authenticate } from '@sensei-hub/core-server'
+import { authorize } from '@sensei-hub/core-server'
 
 export async function importRoutes(app: FastifyInstance): Promise<void> {
   // Registered inside this plugin's own encapsulation context, so the

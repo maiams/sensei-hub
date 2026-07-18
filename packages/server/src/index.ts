@@ -1,5 +1,5 @@
 import { buildApp } from './app.js'
-import { connectDatabase } from './config/database.js'
+import { connectDatabase } from '@sensei-hub/core-server'
 import { env } from './config/env.js'
 import { ClusterManager } from './cluster/ClusterManager.js'
 
@@ -23,7 +23,7 @@ async function main() {
     console.log(`[server] cluster bootstrap complete — self is ${clusterManager.selfHost}`)
   }
 
-  await connectDatabase()
+  await connectDatabase(env.MONGODB_URI)
 
   const app = await buildApp(clusterManager ? { clusterManager } : {})
 

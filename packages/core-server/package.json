@@ -1,0 +1,37 @@
+{
+  "name": "@sensei-hub/core-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "files": ["dist"],
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./testing": {
+      "import": "./dist/testing/db.js",
+      "types": "./dist/testing/db.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@fastify/jwt": "^10.1.0",
+    "@sensei-hub/shared": "workspace:*",
+    "bcryptjs": "^3.0.3",
+    "fastify": "^5.4.0",
+    "mongoose": "^8.16.1",
+    "zod": "^3.25.67"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^3.0.0",
+    "@types/node": "^24.0.10",
+    "mongodb-memory-server": "^11.2.0",
+    "typescript": "^5.8.3"
+  }
+}

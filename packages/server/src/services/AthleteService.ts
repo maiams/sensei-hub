@@ -2,25 +2,15 @@ import mongoose, { type Types } from 'mongoose'
 import { AthleteModel, type AthleteDocument } from '../repositories/AthleteModel.js'
 import { GuardianModel, type GuardianDocument } from '../repositories/GuardianModel.js'
 import { BeltRecordModel, type BeltRecordDocument } from '../repositories/BeltRecordModel.js'
-import { AcademyModel } from '../repositories/AcademyModel.js'
-import { AuditLogModel } from '../repositories/AuditLogModel.js'
+import { AcademyModel, AuditLogModel, type AuthCtx } from '@sensei-hub/core-server'
 import {
   isValidCPF,
   hasMinRole,
-  type UserRole,
   type CreateGuardianInput,
   type CreateBeltRecordInput,
   type CreateAthleteInput,
   type UpdateAthleteInput,
 } from '@sensei-hub/shared'
-
-export interface AthleteCtx {
-  userId: string
-  academyId: string
-  role: UserRole
-  sessionId: string
-  ip?: string
-}
 
 export type CreateAthleteParams = Omit<CreateAthleteInput, 'academyId'>
 export type UpdateAthleteParams = UpdateAthleteInput
@@ -34,7 +24,7 @@ export function isMinor(birthDate: string, referenceDate = new Date().toISOStrin
 }
 
 export class AthleteService {
-  async createAthlete(params: CreateAthleteParams, ctx: AthleteCtx) {
+  async createAthlete(params: CreateAthleteParams, ctx: AuthCtx) {
     const { guardian, ...athleteFields } = params
 
     if (athleteFields.cpf && !isValidCPF(athleteFields.cpf)) {
@@ -145,7 +135,7 @@ export class AthleteService {
     }
   }
 
-  async getAthlete(id: string, ctx: Pick<AthleteCtx, 'academyId' | 'role'>) {
+  async getAthlete(id: string, ctx: Pick<AuthCtx, 'academyId' | 'role'>) {
     const includeMedical = hasMinRole(ctx.role, 'coach')
     const query = AthleteModel.findOne({ _id: id, academyId: ctx.academyId })
     const athlete = includeMedical ? await query.select('+medical') : await query
@@ -189,7 +179,7 @@ export class AthleteService {
     }
   }
 
-  async updateAthlete(id: string, data: UpdateAthleteParams, ctx: AthleteCtx) {
+  async updateAthlete(id: string, data: UpdateAthleteParams, ctx: AuthCtx) {
     const athlete = await AthleteModel.findOne({ _id: id, academyId: ctx.academyId }).select('+medical')
     if (!athlete) {
       throw new AthleteServiceError('Athlete not found', 404)
@@ -256,7 +246,7 @@ export class AthleteService {
     return this.#toDTO(athlete, hasMinRole(ctx.role, 'coach'))
   }
 
-  async deactivateAthlete(id: string, reason: string, ctx: AthleteCtx) {
+  async deactivateAthlete(id: string, reason: string, ctx: AuthCtx) {
     if (!reason || reason.trim().length === 0) {
       throw new AthleteServiceError('Reason is required', 400)
     }
@@ -284,7 +274,7 @@ export class AthleteService {
     })
   }
 
-  async addBeltRecord(athleteId: string, data: CreateBeltRecordInput, ctx: AthleteCtx) {
+  async addBeltRecord(athleteId: string, data: CreateBeltRecordInput, ctx: AuthCtx) {
     const athlete = await AthleteModel.findOne({ _id: athleteId, academyId: ctx.academyId })
     if (!athlete) {
       throw new AthleteServiceError('Athlete not found', 404)
@@ -326,7 +316,7 @@ export class AthleteService {
     return records.map((r) => this.#beltToDTO(r))
   }
 
-  async addGuardian(athleteId: string, data: CreateGuardianInput, ctx: AthleteCtx) {
+  async addGuardian(athleteId: string, data: CreateGuardianInput, ctx: AuthCtx) {
     const athlete = await AthleteModel.findOne({ _id: athleteId, academyId: ctx.academyId })
     if (!athlete) {
       throw new AthleteServiceError('Athlete not found', 404)

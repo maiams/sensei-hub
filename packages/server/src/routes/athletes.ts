@@ -3,8 +3,8 @@ import { z } from 'zod'
 import { CreateAthleteInput, UpdateAthleteInput, CreateBeltRecordInput, RecordWeightInput, CorrectWeightInput, CreateGuardianInput } from '@sensei-hub/shared'
 import { AthleteService, AthleteServiceError } from '../services/AthleteService.js'
 import { WeightService, WeightServiceError } from '../services/WeightService.js'
-import { authenticate } from '../middleware/authenticate.js'
-import { authorize } from '../middleware/authorize.js'
+import { authenticate } from '@sensei-hub/core-server'
+import { authorize } from '@sensei-hub/core-server'
 
 // academyId is NOT accepted from body — it comes from the JWT
 const CreateAthleteBody = CreateAthleteInput.omit({ academyId: true })

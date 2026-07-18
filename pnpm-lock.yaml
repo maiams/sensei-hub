@@ -43,6 +43,40 @@ importers:
         specifier: ^5.8.3
         version: 5.9.3
 
+  packages/core-server:
+    dependencies:
+      '@fastify/jwt':
+        specifier: ^10.1.0
+        version: 10.1.0
+      '@sensei-hub/shared':
+        specifier: workspace:*
+        version: link:../shared
+      bcryptjs:
+        specifier: ^3.0.3
+        version: 3.0.3
+      fastify:
+        specifier: ^5.4.0
+        version: 5.9.0
+      mongoose:
+        specifier: ^8.16.1
+        version: 8.24.1(socks@2.8.9)
+      zod:
+        specifier: ^3.25.67
+        version: 3.25.76
+    devDependencies:
+      '@types/bcryptjs':
+        specifier: ^3.0.0
+        version: 3.0.0
+      '@types/node':
+        specifier: ^24.0.10
+        version: 24.13.2
+      mongodb-memory-server:
+        specifier: ^11.2.0
+        version: 11.2.0(socks@2.8.9)
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
   packages/server:
     dependencies:
       '@fastify/cors':
@@ -57,6 +91,9 @@ importers:
       '@fastify/websocket':
         specifier: ^11.0.2
         version: 11.2.0
+      '@sensei-hub/core-server':
+        specifier: workspace:*
+        version: link:../core-server
       '@sensei-hub/shared':
         specifier: workspace:*
         version: link:../shared

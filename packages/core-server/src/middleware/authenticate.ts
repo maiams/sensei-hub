@@ -1,4 +1,7 @@
 import type { FastifyRequest, FastifyReply } from 'fastify'
+// Side-effect import: loads @fastify/jwt's declaration merging so
+// request.jwtVerify()/app.jwt exist on the Fastify types within this package.
+import '@fastify/jwt'
 import type { UserRole } from '@sensei-hub/shared'
 
 export interface AuthUser {

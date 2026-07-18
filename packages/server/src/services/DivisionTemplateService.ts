@@ -1,6 +1,6 @@
 import { DivisionTemplateModel, type DivisionTemplateDocument } from '../repositories/DivisionTemplateModel.js'
 import { DivisionGroupModel, type DivisionGroupDocument } from '../repositories/DivisionGroupModel.js'
-import { AuditLogModel } from '../repositories/AuditLogModel.js'
+import { AuditLogModel } from '@sensei-hub/core-server'
 import { FPJ_PRESET_TEMPLATES } from './fpjPreset.js'
 import { CBJ_DEFAULT_MATCH_RULES } from '@sensei-hub/shared'
 import type { CreateDivisionTemplateInput, UpdateDivisionTemplateInput, DivisionTemplateDTO } from '@sensei-hub/shared'

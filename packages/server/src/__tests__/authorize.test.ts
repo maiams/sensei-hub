@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { authorize } from '../middleware/authorize.js'
+import { authorize } from '@sensei-hub/core-server'
 import type { FastifyRequest, FastifyReply } from 'fastify'
 
 function mockReply() {

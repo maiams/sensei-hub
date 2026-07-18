@@ -1,8 +1,8 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { ClusterJoinRequest, type ClusterStatusDTO } from '@sensei-hub/shared'
 import { ClusterManager, ClusterManagerError } from '../cluster/ClusterManager.js'
-import { authenticate } from '../middleware/authenticate.js'
-import { authorize } from '../middleware/authorize.js'
+import { authenticate } from '@sensei-hub/core-server'
+import { authorize } from '@sensei-hub/core-server'
 import { env } from '../config/env.js'
 
 const DISABLED_STATUS: ClusterStatusDTO = {

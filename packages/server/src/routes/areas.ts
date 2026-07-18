@@ -2,8 +2,8 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { CreateAreaInput, UpdateAreaInput, CloseAreaInput, ForceMatchInput } from '@sensei-hub/shared'
 import { AreaService, AreaServiceError } from '../services/AreaService.js'
 import { MatchDispatchService, MatchDispatchServiceError } from '../services/MatchDispatchService.js'
-import { authenticate } from '../middleware/authenticate.js'
-import { authorize } from '../middleware/authorize.js'
+import { authenticate } from '@sensei-hub/core-server'
+import { authorize } from '@sensei-hub/core-server'
 
 export async function areaRoutes(app: FastifyInstance): Promise<void> {
   const areaService = new AreaService()

@@ -19,6 +19,7 @@
     "@fastify/jwt": "^10.1.0",
     "@fastify/multipart": "^10.1.0",
     "@fastify/websocket": "^11.0.2",
+    "@sensei-hub/core-server": "workspace:*",
     "@sensei-hub/shared": "workspace:*",
     "bcryptjs": "^3.0.3",
     "fastify": "^5.4.0",

@@ -4,12 +4,12 @@ import { EventModel } from '../repositories/EventModel.js'
 import { DivisionModel } from '../repositories/DivisionModel.js'
 import { EventEntryModel } from '../repositories/EventEntryModel.js'
 import { AthleteModel } from '../repositories/AthleteModel.js'
-import { AuditLogModel } from '../repositories/AuditLogModel.js'
+import { AuditLogModel } from '@sensei-hub/core-server'
 import { EliminationEngine } from '../domain/bracket/EliminationEngine.js'
 import { RodizioEngine } from '../domain/bracket/RodizioEngine.js'
 import { BracketEngineError } from '../domain/bracket/types.js'
 import type { AthleteSlot, BracketConfig, BracketEngine, BracketState, Match as EngineMatch } from '../domain/bracket/types.js'
-import type { AthleteCtx } from './AthleteService.js'
+import type { AuthCtx } from '@sensei-hub/core-server'
 import type { CorrectMatchResultInput, GenerateBracketInput, RecordMatchResultInput } from '@sensei-hub/shared'
 
 export class BracketService {
@@ -18,7 +18,7 @@ export class BracketService {
     academyId: string,
     divisionId: string,
     input: GenerateBracketInput,
-    ctx: AthleteCtx,
+    ctx: AuthCtx,
   ) {
     await this.#findEvent(eventId, academyId)
     const division = await DivisionModel.findOne({ _id: divisionId, eventId })
@@ -140,7 +140,7 @@ export class BracketService {
     divisionId: string,
     matchNumber: number,
     input: RecordMatchResultInput,
-    ctx: AthleteCtx,
+    ctx: AuthCtx,
   ) {
     const { bracket, matches } = await this.#loadActiveBracketState(eventId, academyId, divisionId)
     const match = matches.find((m) => m.matchNumber === matchNumber)
@@ -205,7 +205,7 @@ export class BracketService {
     divisionId: string,
     matchNumber: number,
     input: CorrectMatchResultInput,
-    ctx: AthleteCtx,
+    ctx: AuthCtx,
   ) {
     const { bracket, matches } = await this.#loadActiveBracketState(eventId, academyId, divisionId)
     const match = matches.find((m) => m.matchNumber === matchNumber)

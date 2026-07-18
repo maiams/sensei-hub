@@ -1,6 +1,7 @@
 import { randomBytes, createHash } from 'node:crypto'
 import bcrypt from 'bcryptjs'
 import type { FastifyInstance } from 'fastify'
+import '@fastify/jwt'
 import { UserModel } from '../repositories/UserModel.js'
 import { RefreshTokenModel } from '../repositories/RefreshTokenModel.js'
 import type { UserRole } from '@sensei-hub/shared'

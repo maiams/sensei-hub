@@ -3,9 +3,9 @@ import { AttendanceModel, type AttendanceDocument } from '../repositories/Attend
 import { EventModel } from '../repositories/EventModel.js'
 import { AthleteModel } from '../repositories/AthleteModel.js'
 import { EventEntryModel } from '../repositories/EventEntryModel.js'
-import { AuditLogModel } from '../repositories/AuditLogModel.js'
+import { AuditLogModel } from '@sensei-hub/core-server'
 import { EventEntryService } from './EventEntryService.js'
-import type { AthleteCtx } from './AthleteService.js'
+import type { AuthCtx } from '@sensei-hub/core-server'
 import type { AttendanceDTO, CheckInMethod } from '@sensei-hub/shared'
 
 // Physical presence check-in — separate from EventEntry (per-division
@@ -17,7 +17,7 @@ import type { AttendanceDTO, CheckInMethod } from '@sensei-hub/shared'
 export class CheckInService {
   #entryService = new EventEntryService()
 
-  async checkIn(eventId: string, academyId: string, athleteId: string, method: CheckInMethod, ctx: AthleteCtx) {
+  async checkIn(eventId: string, academyId: string, athleteId: string, method: CheckInMethod, ctx: AuthCtx) {
     await this.#findEvent(eventId, academyId)
     const athlete = await AthleteModel.findOne({ _id: athleteId, academyId })
     if (!athlete) {
@@ -90,7 +90,7 @@ export class CheckInService {
   // and EventEntry's terminal statuses; fixing those requires the specific
   // correction flow for that stage, not an accidental side effect of
   // undoing a check-in.
-  async undoCheckIn(eventId: string, academyId: string, attendanceId: string, reason: string, ctx: AthleteCtx) {
+  async undoCheckIn(eventId: string, academyId: string, attendanceId: string, reason: string, ctx: AuthCtx) {
     await this.#findEvent(eventId, academyId)
     const attendance = await AttendanceModel.findOne({ _id: attendanceId, eventId, academyId })
     if (!attendance) {

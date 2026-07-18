@@ -2,9 +2,9 @@ import { EventEntryModel, type EventEntryDocument } from '../repositories/EventE
 import { EventModel } from '../repositories/EventModel.js'
 import { DivisionModel, type DivisionDocument } from '../repositories/DivisionModel.js'
 import { AthleteModel } from '../repositories/AthleteModel.js'
-import { AuditLogModel } from '../repositories/AuditLogModel.js'
+import { AuditLogModel } from '@sensei-hub/core-server'
 import { WeightService } from './WeightService.js'
-import type { AthleteCtx } from './AthleteService.js'
+import type { AuthCtx } from '@sensei-hub/core-server'
 import type { CreateEventEntryInput, EventEntryStatus } from '@sensei-hub/shared'
 
 // Explicit state machine — "incomplete" is reserved for Fase 3D's Excel import
@@ -39,7 +39,7 @@ export class EventEntryService {
     return entries.map((e) => this.#toDTO(e))
   }
 
-  async createManualEntry(eventId: string, academyId: string, input: CreateEventEntryInput, ctx: AthleteCtx) {
+  async createManualEntry(eventId: string, academyId: string, input: CreateEventEntryInput, ctx: AuthCtx) {
     await this.#findEvent(eventId, academyId)
 
     const division = await DivisionModel.findOne({ _id: input.divisionId, eventId })
@@ -82,7 +82,7 @@ export class EventEntryService {
     return this.#toDTO(entry)
   }
 
-  async checkIn(eventId: string, academyId: string, entryId: string, ctx: AthleteCtx) {
+  async checkIn(eventId: string, academyId: string, entryId: string, ctx: AuthCtx) {
     const entry = await this.#findEntry(eventId, academyId, entryId)
     this.#assertTransition(entry.status, 'checked_in')
 
@@ -106,7 +106,7 @@ export class EventEntryService {
   //    has no siblings to search), falls back to disqualifying.
   //  - 'disqualify': the entry moves straight to the terminal "disqualified"
   //    status.
-  async recordWeighIn(eventId: string, academyId: string, entryId: string, weightKg: number, ctx: AthleteCtx) {
+  async recordWeighIn(eventId: string, academyId: string, entryId: string, weightKg: number, ctx: AuthCtx) {
     const event = await this.#findEvent(eventId, academyId)
     const entry = await EventEntryModel.findOne({ _id: entryId, eventId })
     if (!entry) {
@@ -197,7 +197,7 @@ export class EventEntryService {
 
   // Allows moving the athlete into a different division than originally
   // entered — the common case where weigh-in landed them in another bracket.
-  async confirmEntry(eventId: string, academyId: string, entryId: string, confirmedDivisionId: string | undefined, ctx: AthleteCtx) {
+  async confirmEntry(eventId: string, academyId: string, entryId: string, confirmedDivisionId: string | undefined, ctx: AuthCtx) {
     const entry = await this.#findEntry(eventId, academyId, entryId)
     this.#assertTransition(entry.status, 'confirmed')
 
@@ -216,7 +216,7 @@ export class EventEntryService {
     return this.#toDTO(entry)
   }
 
-  async withdrawEntry(eventId: string, academyId: string, entryId: string, reason: string, ctx: AthleteCtx) {
+  async withdrawEntry(eventId: string, academyId: string, entryId: string, reason: string, ctx: AuthCtx) {
     const entry = await this.#findEntry(eventId, academyId, entryId)
     this.#assertTransition(entry.status, 'withdrawn')
 
@@ -265,7 +265,7 @@ export class EventEntryService {
     }
   }
 
-  async #auditStatusChange(entryId: EventEntryDocument['_id'], oldStatus: string, newStatus: string, ctx: AthleteCtx) {
+  async #auditStatusChange(entryId: EventEntryDocument['_id'], oldStatus: string, newStatus: string, ctx: AuthCtx) {
     await AuditLogModel.create({
       userId: ctx.userId,
       entityType: 'EventEntry',

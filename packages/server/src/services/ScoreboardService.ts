@@ -5,13 +5,13 @@ import { AreaModel } from '../repositories/AreaModel.js'
 import { EventModel, type EventDocument } from '../repositories/EventModel.js'
 import { DivisionModel } from '../repositories/DivisionModel.js'
 import { AthleteModel, type AthleteDocument } from '../repositories/AthleteModel.js'
-import { AuditLogModel } from '../repositories/AuditLogModel.js'
+import { AuditLogModel } from '@sensei-hub/core-server'
 import { applyScore, removeScore, osaekomiAward, endsFight, leader, ScoreboardRulesError } from '../domain/scoreboard/rules.js'
 import { publicDisplayName } from '../domain/publicName.js'
 import { BracketService } from './BracketService.js'
 import { CBJ_DEFAULT_MATCH_RULES } from '@sensei-hub/shared'
 import type { ScoreboardDTO, ScoreType, SideKey, SideScore } from '@sensei-hub/shared'
-import type { AthleteCtx } from './AthleteService.js'
+import type { AuthCtx } from '@sensei-hub/core-server'
 
 // In-process broadcast bus: every committed scoreboard mutation emits the
 // PUBLIC DTO keyed by area, and the WebSocket route fans it out to that
@@ -27,7 +27,7 @@ export class ScoreboardService {
   // Starts the scoreboard for a match already dispatched to this area, or
   // resumes the existing active one (idempotent — an operator refreshing the
   // page must land back on the live fight, never fork a second scoreboard).
-  async startScoreboard(eventId: string, academyId: string, areaId: string, matchId: string, ctx: AthleteCtx) {
+  async startScoreboard(eventId: string, academyId: string, areaId: string, matchId: string, ctx: AuthCtx) {
     const event = await this.#findEvent(eventId, academyId)
     const area = await AreaModel.findOne({ _id: areaId, eventId })
     if (!area) throw new ScoreboardServiceError('Area not found', 404)
@@ -94,7 +94,7 @@ export class ScoreboardService {
     return this.#toDTO(scoreboard, 'operator')
   }
 
-  async startClock(scoreboardId: string, academyId: string, ctx: AthleteCtx) {
+  async startClock(scoreboardId: string, academyId: string, ctx: AuthCtx) {
     const scoreboard = await this.#findActive(scoreboardId, academyId)
     if (!scoreboard.clock.running) {
       scoreboard.clock.running = true
@@ -106,7 +106,7 @@ export class ScoreboardService {
     return this.#toDTO(scoreboard, 'operator')
   }
 
-  async pauseClock(scoreboardId: string, academyId: string, ctx: AthleteCtx) {
+  async pauseClock(scoreboardId: string, academyId: string, ctx: AuthCtx) {
     const scoreboard = await this.#findActive(scoreboardId, academyId)
     this.#freezeClock(scoreboard)
     await scoreboard.save()
@@ -116,7 +116,7 @@ export class ScoreboardService {
   }
 
   // Manual clock correction — always audited.
-  async setClock(scoreboardId: string, academyId: string, clockMs: number, reason: string, ctx: AthleteCtx) {
+  async setClock(scoreboardId: string, academyId: string, clockMs: number, reason: string, ctx: AuthCtx) {
     const scoreboard = await this.#findActive(scoreboardId, academyId)
     const oldMs = this.#currentClockMs(scoreboard)
     scoreboard.clock.clockMs = clockMs
@@ -141,7 +141,7 @@ export class ScoreboardService {
     return this.#toDTO(scoreboard, 'operator')
   }
 
-  async addScore(scoreboardId: string, academyId: string, side: SideKey, type: ScoreType, ctx: AthleteCtx) {
+  async addScore(scoreboardId: string, academyId: string, side: SideKey, type: ScoreType, ctx: AuthCtx) {
     const scoreboard = await this.#findActive(scoreboardId, academyId)
     this.#applyToSide(scoreboard, side, (s) => applyScore(s, type))
     this.#afterScoringChange(scoreboard)
@@ -169,7 +169,7 @@ export class ScoreboardService {
     side: SideKey,
     type: ScoreType,
     reason: string,
-    ctx: AthleteCtx,
+    ctx: AuthCtx,
   ) {
     const scoreboard = await this.#findActive(scoreboardId, academyId)
     this.#applyToSide(scoreboard, side, (s) => removeScore(s, type))
@@ -191,7 +191,7 @@ export class ScoreboardService {
     return this.#toDTO(scoreboard, 'operator')
   }
 
-  async startOsaekomi(scoreboardId: string, academyId: string, holder: SideKey, ctx: AthleteCtx) {
+  async startOsaekomi(scoreboardId: string, academyId: string, holder: SideKey, ctx: AuthCtx) {
     const scoreboard = await this.#findActive(scoreboardId, academyId)
     if (scoreboard.osaekomi) throw new ScoreboardServiceError('Osaekomi already running', 409)
     scoreboard.osaekomi = { holder, startedAt: new Date() }
@@ -203,7 +203,7 @@ export class ScoreboardService {
 
   // Stopping converts held time into a score per the division's thresholds
   // (capped at yuko in golden score — RNC 2025).
-  async stopOsaekomi(scoreboardId: string, academyId: string, ctx: AthleteCtx) {
+  async stopOsaekomi(scoreboardId: string, academyId: string, ctx: AuthCtx) {
     const scoreboard = await this.#findActive(scoreboardId, academyId)
     if (!scoreboard.osaekomi) throw new ScoreboardServiceError('No osaekomi running', 409)
 
@@ -233,7 +233,7 @@ export class ScoreboardService {
   }
 
   // Regular time over, board tied, division allows it → golden score.
-  async enterGoldenScore(scoreboardId: string, academyId: string, ctx: AthleteCtx) {
+  async enterGoldenScore(scoreboardId: string, academyId: string, ctx: AuthCtx) {
     const scoreboard = await this.#findActive(scoreboardId, academyId)
     if (scoreboard.phase !== 'regular') throw new ScoreboardServiceError('Already in golden score', 409)
     if (!scoreboard.matchRules.goldenScoreEnabled) {
@@ -276,7 +276,7 @@ export class ScoreboardService {
     academyId: string,
     winnerId: string,
     method: string,
-    ctx: AthleteCtx,
+    ctx: AuthCtx,
   ) {
     const scoreboard = await this.#findActive(scoreboardId, academyId)
     const sideIds = [scoreboard.sides.A.athleteId.toString(), scoreboard.sides.B.athleteId.toString()]
@@ -306,7 +306,7 @@ export class ScoreboardService {
   // Wrong match started, athlete didn't show, etc. Releases the match back
   // to the dispatch pool (same as AreaService.closeArea does for reserved,
   // undecided matches).
-  async abortScoreboard(scoreboardId: string, academyId: string, reason: string, ctx: AthleteCtx) {
+  async abortScoreboard(scoreboardId: string, academyId: string, reason: string, ctx: AuthCtx) {
     const scoreboard = await this.#findActive(scoreboardId, academyId)
     this.#freezeClock(scoreboard)
     scoreboard.osaekomi = null

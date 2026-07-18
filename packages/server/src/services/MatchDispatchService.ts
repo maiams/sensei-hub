@@ -3,7 +3,7 @@ import { BracketModel } from '../repositories/BracketModel.js'
 import { MatchModel, type MatchDocument } from '../repositories/MatchModel.js'
 import { ScoreboardModel } from '../repositories/ScoreboardModel.js'
 import { EventModel } from '../repositories/EventModel.js'
-import { AuditLogModel } from '../repositories/AuditLogModel.js'
+import { AuditLogModel } from '@sensei-hub/core-server'
 import type { EventCtx } from './EventService.js'
 
 export interface DispatchCandidate {

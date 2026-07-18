@@ -11,8 +11,8 @@ import {
 import { ScoreboardService, ScoreboardServiceError, scoreboardEvents } from '../services/ScoreboardService.js'
 import { PublicDisplayService, PublicDisplayServiceError } from '../services/PublicDisplayService.js'
 import { BracketServiceError } from '../services/BracketService.js'
-import { authenticate } from '../middleware/authenticate.js'
-import { authorize } from '../middleware/authorize.js'
+import { authenticate } from '@sensei-hub/core-server'
+import { authorize } from '@sensei-hub/core-server'
 
 export async function scoreboardRoutes(app: FastifyInstance): Promise<void> {
   const service = new ScoreboardService()

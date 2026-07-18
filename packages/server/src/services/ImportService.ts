@@ -6,8 +6,9 @@ import { DivisionGroupModel } from '../repositories/DivisionGroupModel.js'
 import { AthleteModel } from '../repositories/AthleteModel.js'
 import { EventEntryModel } from '../repositories/EventEntryModel.js'
 import { ImportJobModel, type ImportJobDocument } from '../repositories/ImportJobModel.js'
-import { AuditLogModel } from '../repositories/AuditLogModel.js'
-import { AthleteService, isMinor, type AthleteCtx } from './AthleteService.js'
+import { AuditLogModel } from '@sensei-hub/core-server'
+import { AthleteService, isMinor } from './AthleteService.js'
+import type { AuthCtx } from '@sensei-hub/core-server'
 import { isValidCPF, type Belt, type Gender, type ImportRowError } from '@sensei-hub/shared'
 
 // Fixed column order (A–N) — position matters, header text is a label only.
@@ -333,7 +334,7 @@ export class ImportService {
     rows: ParsedRow[],
     eventId: string,
     academyId: string,
-    ctx: AthleteCtx,
+    ctx: AuthCtx,
     importJobId: string,
   ): Promise<{ successCount: number; errors: ImportRowError[] }> {
     let successCount = 0
@@ -412,7 +413,7 @@ export class ImportService {
     return { successCount, errors }
   }
 
-  async runImport(buffer: Buffer, filename: string, eventId: string, academyId: string, ctx: AthleteCtx) {
+  async runImport(buffer: Buffer, filename: string, eventId: string, academyId: string, ctx: AuthCtx) {
     const { valid, errors: parseErrors } = await this.parseAndValidate(buffer, eventId, academyId)
 
     const jobId = new Types.ObjectId()
