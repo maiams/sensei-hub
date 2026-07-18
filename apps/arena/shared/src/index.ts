@@ -1,3 +1,4 @@
+export * from './competitor.js'
 export * from './event.js'
 export * from './divisionTemplate.js'
 export * from './bracket.js'

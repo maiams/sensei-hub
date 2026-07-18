@@ -1,17 +1,9 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
-import { CreateAthleteInput, UpdateAthleteInput, CreateBeltRecordInput, RecordWeightInput, CorrectWeightInput, CreateGuardianInput } from '@dojo/shared'
-import { AthleteService, AthleteServiceError } from '../services/AthleteService.js'
+import { CreateCompetitorInput, UpdateCompetitorInput } from '@arena/shared'
+import { CompetitorService, CompetitorServiceError } from '../services/CompetitorService.js'
 import { WeightService, WeightServiceError } from '../services/WeightService.js'
-import { authenticate } from '@sensei-hub/core-server'
-import { authorize } from '@sensei-hub/core-server'
-
-// academyId is NOT accepted from body — it comes from the JWT
-const CreateAthleteBody = CreateAthleteInput.omit({ academyId: true })
-
-const DeactivateAthleteBody = z.object({
-  reason: z.string().min(3).max(500),
-})
+import { authenticate, authorize } from '@sensei-hub/core-server'
 
 const ListAthletesQuery = z.object({
   q: z.string().optional(),
@@ -19,32 +11,47 @@ const ListAthletesQuery = z.object({
   pageSize: z.coerce.number().int().positive().optional(),
 })
 
+// Official event weigh-in outside the entry flow always belongs to an event
+const RecordWeightBody = z.object({
+  weightKg: z.number().positive().max(300),
+  eventId: z.string(),
+})
+
+const CorrectWeightBody = z.object({
+  weightKg: z.number().positive().max(300),
+  reason: z.string().min(3).max(500),
+})
+
 export async function athleteRoutes(app: FastifyInstance): Promise<void> {
-  const athleteService = new AthleteService()
+  const competitorService = new CompetitorService()
   const weightService = new WeightService()
 
   function handleError(err: unknown, reply: import('fastify').FastifyReply) {
-    if (err instanceof AthleteServiceError || err instanceof WeightServiceError) {
+    if (err instanceof CompetitorServiceError || err instanceof WeightServiceError) {
       return reply.status(err.statusCode).send({ error: err.message })
     }
     throw err
   }
 
-  // ─── Athlete CRUD ──────────────────────────────────────────────────────────
+  function ctxOf(request: import('fastify').FastifyRequest) {
+    return {
+      userId: request.authUser.id,
+      academyId: request.authUser.academyId,
+      role: request.authUser.role,
+      sessionId: request.id,
+      ip: request.ip,
+    }
+  }
+
+  // ─── Competitor CRUD ──────────────────────────────────────────────────────
 
   app.post('/athletes', { preHandler: [authenticate, authorize('staff')] }, async (request, reply) => {
-    const parsed = CreateAthleteBody.safeParse(request.body)
+    const parsed = CreateCompetitorInput.safeParse(request.body)
     if (!parsed.success) {
       return reply.status(400).send({ error: 'Validation failed', details: parsed.error.flatten() })
     }
     try {
-      const athlete = await athleteService.createAthlete(parsed.data, {
-        userId: request.authUser.id,
-        academyId: request.authUser.academyId,
-        role: request.authUser.role,
-        sessionId: request.id,
-        ip: request.ip,
-      })
+      const athlete = await competitorService.createCompetitor(parsed.data, ctxOf(request))
       return reply.status(201).send(athlete)
     } catch (err) {
       return handleError(err, reply)
@@ -56,17 +63,14 @@ export async function athleteRoutes(app: FastifyInstance): Promise<void> {
     if (!parsed.success) {
       return reply.status(400).send({ error: 'Validation failed', details: parsed.error.flatten() })
     }
-    const result = await athleteService.listAthletes(request.authUser.academyId, parsed.data)
+    const result = await competitorService.listCompetitors(request.authUser.academyId, parsed.data)
     return reply.send(result)
   })
 
   app.get('/athletes/:id', { preHandler: [authenticate, authorize('staff')] }, async (request, reply) => {
     const { id } = request.params as { id: string }
     try {
-      const athlete = await athleteService.getAthlete(id, {
-        academyId: request.authUser.academyId,
-        role: request.authUser.role,
-      })
+      const athlete = await competitorService.getCompetitor(id, request.authUser.academyId)
       return reply.send(athlete)
     } catch (err) {
       return handleError(err, reply)
@@ -75,98 +79,28 @@ export async function athleteRoutes(app: FastifyInstance): Promise<void> {
 
   app.patch('/athletes/:id', { preHandler: [authenticate, authorize('staff')] }, async (request, reply) => {
     const { id } = request.params as { id: string }
-    const parsed = UpdateAthleteInput.safeParse(request.body)
+    const parsed = UpdateCompetitorInput.safeParse(request.body)
     if (!parsed.success) {
       return reply.status(400).send({ error: 'Validation failed', details: parsed.error.flatten() })
     }
     try {
-      const athlete = await athleteService.updateAthlete(id, parsed.data, {
-        userId: request.authUser.id,
-        academyId: request.authUser.academyId,
-        role: request.authUser.role,
-        sessionId: request.id,
-        ip: request.ip,
-      })
+      const athlete = await competitorService.updateCompetitor(id, parsed.data, ctxOf(request))
       return reply.send(athlete)
     } catch (err) {
       return handleError(err, reply)
     }
   })
 
-  app.delete('/athletes/:id', { preHandler: [authenticate, authorize('academy_admin')] }, async (request, reply) => {
-    const { id } = request.params as { id: string }
-    const parsed = DeactivateAthleteBody.safeParse(request.body)
-    if (!parsed.success) {
-      return reply.status(400).send({ error: 'Validation failed', details: parsed.error.flatten() })
-    }
-    try {
-      await athleteService.deactivateAthlete(id, parsed.data.reason, {
-        userId: request.authUser.id,
-        academyId: request.authUser.academyId,
-        role: request.authUser.role,
-        sessionId: request.id,
-        ip: request.ip,
-      })
-      return reply.status(204).send()
-    } catch (err) {
-      return handleError(err, reply)
-    }
-  })
-
-  // ─── Belt records ────────────────────────────────────────────────────────
-
-  app.post('/athletes/:id/belts', { preHandler: [authenticate, authorize('coach')] }, async (request, reply) => {
-    const { id } = request.params as { id: string }
-    const parsed = CreateBeltRecordInput.safeParse(request.body)
-    if (!parsed.success) {
-      return reply.status(400).send({ error: 'Validation failed', details: parsed.error.flatten() })
-    }
-    try {
-      const record = await athleteService.addBeltRecord(id, parsed.data, {
-        userId: request.authUser.id,
-        academyId: request.authUser.academyId,
-        role: request.authUser.role,
-        sessionId: request.id,
-        ip: request.ip,
-      })
-      return reply.status(201).send(record)
-    } catch (err) {
-      return handleError(err, reply)
-    }
-  })
-
-  app.get('/athletes/:id/belts', { preHandler: [authenticate, authorize('staff')] }, async (request, reply) => {
-    const { id } = request.params as { id: string }
-    try {
-      const records = await athleteService.listBeltRecords(id, request.authUser.academyId)
-      return reply.send(records)
-    } catch (err) {
-      return handleError(err, reply)
-    }
-  })
-
-  // ─── Weight records ──────────────────────────────────────────────────────
+  // ─── Weigh-in records ─────────────────────────────────────────────────────
 
   app.post('/athletes/:id/weights', { preHandler: [authenticate, authorize('weigh_in_operator')] }, async (request, reply) => {
     const { id } = request.params as { id: string }
-    const parsed = RecordWeightInput.safeParse(request.body)
+    const parsed = RecordWeightBody.safeParse(request.body)
     if (!parsed.success) {
       return reply.status(400).send({ error: 'Validation failed', details: parsed.error.flatten() })
     }
     try {
-      const record = await weightService.recordWeight(
-        id,
-        parsed.data.weightKg,
-        'manual',
-        {
-          userId: request.authUser.id,
-          academyId: request.authUser.academyId,
-          role: request.authUser.role,
-          sessionId: request.id,
-          ip: request.ip,
-        },
-        parsed.data.eventId,
-      )
+      const record = await weightService.recordWeight(id, parsed.data.weightKg, 'manual', ctxOf(request), parsed.data.eventId)
       return reply.status(201).send(record)
     } catch (err) {
       return handleError(err, reply)
@@ -188,54 +122,16 @@ export async function athleteRoutes(app: FastifyInstance): Promise<void> {
     { preHandler: [authenticate, authorize('event_manager')] },
     async (request, reply) => {
       const { wid } = request.params as { id: string; wid: string }
-      const parsed = CorrectWeightInput.safeParse(request.body)
+      const parsed = CorrectWeightBody.safeParse(request.body)
       if (!parsed.success) {
         return reply.status(400).send({ error: 'Validation failed', details: parsed.error.flatten() })
       }
       try {
-        const record = await weightService.correctWeight(wid, parsed.data.weightKg, parsed.data.reason, {
-          userId: request.authUser.id,
-          academyId: request.authUser.academyId,
-          role: request.authUser.role,
-          sessionId: request.id,
-          ip: request.ip,
-        })
+        const record = await weightService.correctWeight(wid, parsed.data.weightKg, parsed.data.reason, ctxOf(request))
         return reply.status(201).send(record)
       } catch (err) {
         return handleError(err, reply)
       }
     },
   )
-
-  // ─── Guardian ──────────────────────────────────────────────────────────────
-
-  app.post('/athletes/:id/guardian', { preHandler: [authenticate, authorize('staff')] }, async (request, reply) => {
-    const { id } = request.params as { id: string }
-    const parsed = CreateGuardianInput.safeParse(request.body)
-    if (!parsed.success) {
-      return reply.status(400).send({ error: 'Validation failed', details: parsed.error.flatten() })
-    }
-    try {
-      const guardian = await athleteService.addGuardian(id, parsed.data, {
-        userId: request.authUser.id,
-        academyId: request.authUser.academyId,
-        role: request.authUser.role,
-        sessionId: request.id,
-        ip: request.ip,
-      })
-      return reply.status(201).send(guardian)
-    } catch (err) {
-      return handleError(err, reply)
-    }
-  })
-
-  app.get('/athletes/:id/guardian', { preHandler: [authenticate, authorize('staff')] }, async (request, reply) => {
-    const { id } = request.params as { id: string }
-    try {
-      const guardian = await athleteService.getGuardian(id, request.authUser.academyId)
-      return reply.send(guardian)
-    } catch (err) {
-      return handleError(err, reply)
-    }
-  })
 }

@@ -131,7 +131,6 @@ interface EntryDTO {
 
 interface AthleteDTO {
   id: string
-  scope: string
   clubName?: string
   cpf?: string
   currentBelt?: string
@@ -211,7 +210,6 @@ describe('POST /api/events/:id/import', () => {
       headers: { authorization: `Bearer ${token}` },
     })
     const athlete = athleteRes.json<AthleteDTO>()
-    expect(athlete.scope).toBe('event-only')
     expect(athlete.clubName).toBe('Academia Visitante')
     expect(athlete.currentBelt).toBe('coral-8dan')
   })

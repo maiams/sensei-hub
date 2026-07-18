@@ -20,9 +20,6 @@ importers:
       '@arena/shared':
         specifier: workspace:*
         version: link:../shared
-      '@dojo/shared':
-        specifier: workspace:*
-        version: link:../../dojo/shared
       '@fastify/cors':
         specifier: ^10.0.2
         version: 10.1.0

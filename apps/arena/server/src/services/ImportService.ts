@@ -7,7 +7,7 @@ import { AthleteModel } from '../repositories/AthleteModel.js'
 import { EventEntryModel } from '../repositories/EventEntryModel.js'
 import { ImportJobModel, type ImportJobDocument } from '../repositories/ImportJobModel.js'
 import { AuditLogModel } from '@sensei-hub/core-server'
-import { AthleteService, isMinor } from './AthleteService.js'
+import { CompetitorService, isMinor } from './CompetitorService.js'
 import type { AuthCtx } from '@sensei-hub/core-server'
 import { isValidCPF, type Belt, type Gender } from '@sensei-hub/shared'
 import { type ImportRowError } from '@arena/shared'
@@ -171,7 +171,7 @@ function matchDivision(
 }
 
 export class ImportService {
-  #athleteService = new AthleteService()
+  #competitorService = new CompetitorService()
 
   getTemplate(): Buffer {
     const worksheet = XLSX.utils.aoa_to_sheet([TEMPLATE_HEADERS])
@@ -324,13 +324,13 @@ export class ImportService {
     return { valid, errors }
   }
 
-  // Each row is created atomically for its own Athlete(+Guardian) — see
-  // AthleteService.createAthlete — followed by its EventEntry as a separate
+  // Each row creates its own competitor — see
+  // CompetitorService.createCompetitor — followed by its EventEntry as a separate
   // step. A crash between the two would leave an orphan Athlete with no
   // entry; acceptable here because it surfaces as a row error in the job
   // report (never silently lost) and is correctable by re-running the import
   // or editing the athlete by hand, rather than by threading an external
-  // Mongo session through AthleteService for this one caller.
+  // Mongo session through CompetitorService for this one caller.
   async importRows(
     rows: ParsedRow[],
     eventId: string,
@@ -344,7 +344,7 @@ export class ImportService {
     for (const row of rows) {
       try {
         let athleteId: string
-        // AthleteService stores cpf exactly as submitted (punctuated or not),
+        // The competitor registry stores cpf exactly as submitted (punctuated or not),
         // while row.cpf here is already digits-only — compare by stripped
         // digits rather than an exact-string Mongo match so a permanent
         // athlete registered as "111.444.777-35" is still found when the
@@ -357,37 +357,24 @@ export class ImportService {
         if (existing) {
           athleteId = existing._id.toString()
         } else {
-          const created = await this.#athleteService.createAthlete(
+          // termsAccepted: true is safe here — parseAndValidate rejects
+          // any minor row whose termos_aceitos isn't "S" before it ever
+          // reaches `valid`, so every row that gets here already has
+          // guardian consent confirmed by the importing operator.
+          const created = await this.#competitorService.createCompetitor(
             {
-              scope: 'event-only',
-              eventOnlyEventId: eventId,
               fullName: row.fullName,
               preferredName: row.preferredName,
               gender: row.gender,
               birthDate: row.birthDate,
-              nationality: 'Brazilian',
               email: row.email,
               phone: row.phone,
               cpf: row.cpf,
               currentBelt: row.belt,
               clubName: row.clubName,
-              hasMedicalRestriction: false,
+              guardianName: row.guardianName,
+              guardianPhone: row.guardianPhone,
               termsAccepted: row.termsAccepted,
-              imageAuthorizationAccepted: false,
-              // termsAccepted: true is safe here — parseAndValidate rejects
-              // any minor row whose termos_aceitos isn't "S" before it ever
-              // reaches `valid`, so every row that gets here already has
-              // guardian consent confirmed by the importing operator.
-              guardian:
-                row.isMinor && row.guardianName && row.guardianPhone
-                  ? {
-                      name: row.guardianName,
-                      relationship: 'guardian',
-                      phone: row.guardianPhone,
-                      termsAccepted: true,
-                      imageAuthorizationAccepted: false,
-                    }
-                  : undefined,
             },
             ctx,
           )

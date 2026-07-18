@@ -401,7 +401,7 @@ describe('Public payloads and privacy', () => {
     const { token, eventId, areaId, match } = await setupFight({
       eventOverrides: { publicHideNamesUnderAge: 18 },
       athleteOverrides: [
-        { fullName: 'Maria Silva Santos', birthDate: '2015-05-05', guardian: { name: 'Resp Silva', relationship: 'mother', phone: '11999990000', termsAccepted: true } }, // 11 at event date → hidden
+        { fullName: 'Maria Silva Santos', birthDate: '2015-05-05', guardianName: 'Resp Silva', guardianPhone: '11999990000' }, // 11 at event date → hidden
         { fullName: 'José Oliveira', birthDate: '1990-01-01' },
         { fullName: 'Pedro Souza', birthDate: '1991-01-01' },
       ],
@@ -429,7 +429,7 @@ describe('Public payloads and privacy', () => {
     const { token, eventId, areaId, match } = await setupFight({
       eventOverrides: { publicHideNamesUnderAge: 18 },
       athleteOverrides: [
-        { fullName: 'Maria Silva Santos', birthDate: '2015-05-05', guardian: { name: 'Resp Silva', relationship: 'mother', phone: '11999990000', termsAccepted: true } },
+        { fullName: 'Maria Silva Santos', birthDate: '2015-05-05', guardianName: 'Resp Silva', guardianPhone: '11999990000' },
         { fullName: 'José Oliveira', birthDate: '1990-01-01' },
         { fullName: 'Pedro Souza', birthDate: '1991-01-01' },
       ],

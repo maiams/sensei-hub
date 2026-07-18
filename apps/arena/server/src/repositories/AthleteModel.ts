@@ -1,35 +1,29 @@
 import { Schema, model, type Types } from 'mongoose'
 import { BELT_VALUES, type Gender, type Belt } from '@sensei-hub/shared'
-import { type AthleteScope, type AthleteStatus } from '@dojo/shared'
 
+// Arena competitor registry. The mongoose model name stays 'Athlete' so every
+// athleteId ref (EventEntry, Bracket, Match, Scoreboard, Attendance,
+// WeightRecord) is unchanged, but the schema is the slim championship shape —
+// no anamnese/medical, no enrollment/status, guardian as plain text.
 export interface AthleteDocument {
   _id: Types.ObjectId
   academyId: Types.ObjectId
-  scope: AthleteScope
-  eventOnlyEventId?: Types.ObjectId
-  status: AthleteStatus
-  enrollmentNumber: string
   fullName: string
   preferredName?: string
   gender: Gender
   birthDate: string // YYYY-MM-DD
-  nationality: string
-  email?: string
-  phone?: string
   cpf?: string
   currentBelt: Belt
+  clubName?: string
   federationNumber?: string
   zempoNumber?: string
-  clubName?: string
-  latestWeightKg?: number
-  hasMedicalRestriction: boolean
-  medical?: {
-    notes?: string
-    allergies?: string
-  }
+  email?: string
+  phone?: string
+  guardianName?: string
+  guardianPhone?: string
   termsAccepted: boolean
-  imageAuthorizationAccepted: boolean
-  deactivatedReason?: string
+  notes?: string
+  latestWeightKg?: number
   createdAt: Date
   updatedAt: Date
 }
@@ -37,49 +31,28 @@ export interface AthleteDocument {
 const athleteSchema = new Schema<AthleteDocument>(
   {
     academyId: { type: Schema.Types.ObjectId, ref: 'Academy', required: true, index: true },
-    scope: { type: String, required: true, enum: ['academy', 'event-only'], default: 'academy' },
-    eventOnlyEventId: { type: Schema.Types.ObjectId, ref: 'Event' },
-    status: { type: String, required: true, enum: ['active', 'inactive', 'suspended', 'pending'], default: 'active' },
-    enrollmentNumber: { type: String, required: true },
     fullName: { type: String, required: true, trim: true, maxlength: 120 },
     preferredName: { type: String, trim: true, maxlength: 60 },
     gender: { type: String, required: true, enum: ['male', 'female', 'not_informed'] },
     birthDate: { type: String, required: true },
-    nationality: { type: String, required: true, default: 'Brazilian' },
-    email: { type: String, trim: true, lowercase: true },
-    phone: { type: String, trim: true },
     cpf: { type: String, trim: true },
-    currentBelt: {
-      type: String,
-      required: true,
-      enum: BELT_VALUES,
-    },
+    currentBelt: { type: String, required: true, enum: BELT_VALUES },
+    clubName: { type: String, trim: true, maxlength: 120 },
     federationNumber: { type: String, trim: true },
     zempoNumber: { type: String, trim: true },
-    clubName: { type: String, trim: true, maxlength: 120 },
-    latestWeightKg: { type: Number },
-    hasMedicalRestriction: { type: Boolean, required: true, default: false },
-    medical: {
-      type: new Schema(
-        {
-          notes: { type: String, maxlength: 2000 },
-          allergies: { type: String, maxlength: 1000 },
-        },
-        { _id: false },
-      ),
-      select: false,
-    },
+    email: { type: String, trim: true, lowercase: true },
+    phone: { type: String, trim: true },
+    guardianName: { type: String, trim: true, maxlength: 120 },
+    guardianPhone: { type: String, trim: true },
     termsAccepted: { type: Boolean, required: true, default: false },
-    imageAuthorizationAccepted: { type: Boolean, required: true, default: false },
-    deactivatedReason: { type: String },
+    notes: { type: String, maxlength: 1000 },
+    latestWeightKg: { type: Number },
   },
   { timestamps: true },
 )
 
-athleteSchema.index({ academyId: 1, status: 1 })
-athleteSchema.index({ academyId: 1, enrollmentNumber: 1 }, { unique: true })
-// CPF unique per academy, only when present — visiting event-only athletes may
-// already exist as a permanent athlete in another academy (see status-e-plano.md).
+athleteSchema.index({ academyId: 1, fullName: 1 })
+// CPF unique per organization, only when present
 athleteSchema.index(
   { academyId: 1, cpf: 1 },
   { unique: true, partialFilterExpression: { cpf: { $type: 'string' } } },

@@ -5,7 +5,7 @@ import type { WeightSource } from '@sensei-hub/shared'
 import type { AuthCtx } from '@sensei-hub/core-server'
 
 export class WeightService {
-  async recordWeight(athleteId: string, weightKg: number, source: WeightSource, ctx: AuthCtx, eventId?: string) {
+  async recordWeight(athleteId: string, weightKg: number, source: WeightSource, ctx: AuthCtx, eventId: string) {
     const athlete = await AthleteModel.findOne({ _id: athleteId, academyId: ctx.academyId })
     if (!athlete) {
       throw new WeightServiceError('Athlete not found', 404)
