@@ -3,7 +3,7 @@ import { DivisionGroupModel, type DivisionGroupDocument } from '../repositories/
 import { AuditLogModel } from '@sensei-hub/core-server'
 import { findFpjPresetTemplate } from './fpjPreset.js'
 import type { DivisionCtx } from './DivisionTemplateService.js'
-import type { WeightCategoryRow, DivisionGroupDTO, CreateDivisionGroupInput, UpdateDivisionGroupInput } from '@sensei-hub/shared'
+import type { WeightCategoryRow, DivisionGroupDTO, CreateDivisionGroupInput, UpdateDivisionGroupInput } from '@arena/shared'
 
 function validateCategoryOrder(categories: WeightCategoryRow[]): void {
   categories.forEach((cat, i) => {

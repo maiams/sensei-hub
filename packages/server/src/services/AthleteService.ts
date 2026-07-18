@@ -3,14 +3,8 @@ import { AthleteModel, type AthleteDocument } from '../repositories/AthleteModel
 import { GuardianModel, type GuardianDocument } from '../repositories/GuardianModel.js'
 import { BeltRecordModel, type BeltRecordDocument } from '../repositories/BeltRecordModel.js'
 import { AcademyModel, AuditLogModel, type AuthCtx } from '@sensei-hub/core-server'
-import {
-  isValidCPF,
-  hasMinRole,
-  type CreateGuardianInput,
-  type CreateBeltRecordInput,
-  type CreateAthleteInput,
-  type UpdateAthleteInput,
-} from '@sensei-hub/shared'
+import { isValidCPF, hasMinRole } from '@sensei-hub/shared'
+import { type CreateGuardianInput, type CreateBeltRecordInput, type CreateAthleteInput, type UpdateAthleteInput } from '@dojo/shared'
 
 export type CreateAthleteParams = Omit<CreateAthleteInput, 'academyId'>
 export type UpdateAthleteParams = UpdateAthleteInput

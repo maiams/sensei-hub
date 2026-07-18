@@ -9,8 +9,8 @@ import { AuditLogModel } from '@sensei-hub/core-server'
 import { applyScore, removeScore, osaekomiAward, endsFight, leader, ScoreboardRulesError } from '../domain/scoreboard/rules.js'
 import { publicDisplayName } from '../domain/publicName.js'
 import { BracketService } from './BracketService.js'
-import { CBJ_DEFAULT_MATCH_RULES } from '@sensei-hub/shared'
-import type { ScoreboardDTO, ScoreType, SideKey, SideScore } from '@sensei-hub/shared'
+import { CBJ_DEFAULT_MATCH_RULES } from '@arena/shared'
+import type { ScoreboardDTO, ScoreType, SideKey, SideScore } from '@arena/shared'
 import type { AuthCtx } from '@sensei-hub/core-server'
 
 // In-process broadcast bus: every committed scoreboard mutation emits the

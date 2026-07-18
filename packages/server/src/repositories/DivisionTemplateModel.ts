@@ -1,5 +1,5 @@
 import { Schema, model, type Types } from 'mongoose'
-import type { MatchRules } from '@sensei-hub/shared'
+import type { MatchRules } from '@arena/shared'
 
 // Shared sub-schema shape for MatchRules (also used by DivisionModel).
 // Documents created before this field existed won't have it — readers must

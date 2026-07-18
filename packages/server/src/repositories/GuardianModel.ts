@@ -1,5 +1,5 @@
 import { Schema, model, type Types } from 'mongoose'
-import type { GuardianRelationship } from '@sensei-hub/shared'
+import type { GuardianRelationship } from '@dojo/shared'
 
 export interface GuardianDocument {
   _id: Types.ObjectId

@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
-import { CreateDivisionTemplateInput, UpdateDivisionTemplateInput, CreateDivisionGroupInput, UpdateDivisionGroupInput } from '@sensei-hub/shared'
+import { CreateDivisionTemplateInput, UpdateDivisionTemplateInput, CreateDivisionGroupInput, UpdateDivisionGroupInput } from '@arena/shared'
 import { DivisionTemplateService, DivisionTemplateServiceError } from '../services/DivisionTemplateService.js'
 import { DivisionGroupService, DivisionGroupServiceError } from '../services/DivisionGroupService.js'
 import { authenticate } from '@sensei-hub/core-server'

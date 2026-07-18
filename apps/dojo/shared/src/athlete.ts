@@ -1,23 +1,11 @@
 import { z } from 'zod'
+import { Belt, Gender, WeightSource } from '@sensei-hub/shared'
 
 export const AthleteScope = z.enum(['academy', 'event-only'])
 export type AthleteScope = z.infer<typeof AthleteScope>
 
 export const AthleteStatus = z.enum(['active', 'inactive', 'suspended', 'pending'])
 export type AthleteStatus = z.infer<typeof AthleteStatus>
-
-export const BELT_VALUES = [
-  'white', 'burgundy', 'gray', 'blue', 'yellow', 'orange', 'green', 'purple', 'brown',
-  'black-1dan', 'black-2dan', 'black-3dan', 'black-4dan', 'black-5dan',
-  'coral-6dan', 'coral-7dan', 'coral-8dan',
-  'red-9dan', 'red-10dan',
-] as const
-
-export const Belt = z.enum(BELT_VALUES)
-export type Belt = z.infer<typeof Belt>
-
-export const Gender = z.enum(['male', 'female', 'not_informed'])
-export type Gender = z.infer<typeof Gender>
 
 // Mutable fields an operator can provide when creating an athlete
 const AthleteWritableFields = {
@@ -152,9 +140,6 @@ export const BeltRecordDTO = z.object({
 export type BeltRecordDTO = z.infer<typeof BeltRecordDTO>
 
 // ─── Weight records ──────────────────────────────────────────────────────────
-
-export const WeightSource = z.enum(['manual', 'scale', 'import', 'corrected'])
-export type WeightSource = z.infer<typeof WeightSource>
 
 // POST /api/athletes/:id/weights
 export const RecordWeightInput = z.object({

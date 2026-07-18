@@ -5,7 +5,7 @@ import { AthleteModel } from '../repositories/AthleteModel.js'
 import { AuditLogModel } from '@sensei-hub/core-server'
 import { WeightService } from './WeightService.js'
 import type { AuthCtx } from '@sensei-hub/core-server'
-import type { CreateEventEntryInput, EventEntryStatus } from '@sensei-hub/shared'
+import type { CreateEventEntryInput, EventEntryStatus } from '@arena/shared'
 
 // Explicit state machine — "incomplete" is reserved for Fase 3D's Excel import
 // (a row missing required fields); nothing creates that status yet, but the

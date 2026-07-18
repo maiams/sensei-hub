@@ -1,5 +1,5 @@
 import { Schema, model, type Types } from 'mongoose'
-import type { CheckInMethod, AttendanceStatus } from '@sensei-hub/shared'
+import type { CheckInMethod, AttendanceStatus } from '@arena/shared'
 
 export interface AttendanceDocument {
   _id: Types.ObjectId

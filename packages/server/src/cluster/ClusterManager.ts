@@ -8,7 +8,7 @@ import {
   toClusterStatusDTO,
   type RawMemberStatus,
 } from './rules.js'
-import type { ClusterStatusDTO } from '@sensei-hub/shared'
+import type { ClusterStatusDTO } from '@arena/shared'
 
 export interface ClusterManagerConfig {
   serverPort: number

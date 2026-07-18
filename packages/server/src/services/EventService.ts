@@ -1,6 +1,6 @@
 import { EventModel, type EventDocument } from '../repositories/EventModel.js'
 import { AuditLogModel } from '@sensei-hub/core-server'
-import type { CreateEventInput, UpdateEventInput } from '@sensei-hub/shared'
+import type { CreateEventInput, UpdateEventInput } from '@arena/shared'
 
 export interface EventCtx {
   userId: string

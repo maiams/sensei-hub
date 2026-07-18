@@ -5,7 +5,7 @@ import { BracketModel } from '../repositories/BracketModel.js'
 import { MatchModel } from '../repositories/MatchModel.js'
 import { AuditLogModel } from '@sensei-hub/core-server'
 import type { EventCtx } from './EventService.js'
-import type { CreateAreaInput, UpdateAreaInput } from '@sensei-hub/shared'
+import type { CreateAreaInput, UpdateAreaInput } from '@arena/shared'
 
 export class AreaService {
   async createArea(eventId: string, academyId: string, input: CreateAreaInput, ctx: EventCtx) {

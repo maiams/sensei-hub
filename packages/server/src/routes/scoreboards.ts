@@ -1,13 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
-import {
-  StartScoreboardInput,
-  AddScoreInput,
-  RemoveScoreInput,
-  SetClockInput,
-  StartOsaekomiInput,
-  DeclareWinnerInput,
-  AbortScoreboardInput,
-} from '@sensei-hub/shared'
+import { StartScoreboardInput, AddScoreInput, RemoveScoreInput, SetClockInput, StartOsaekomiInput, DeclareWinnerInput, AbortScoreboardInput } from '@arena/shared'
 import { ScoreboardService, ScoreboardServiceError, scoreboardEvents } from '../services/ScoreboardService.js'
 import { PublicDisplayService, PublicDisplayServiceError } from '../services/PublicDisplayService.js'
 import { BracketServiceError } from '../services/BracketService.js'

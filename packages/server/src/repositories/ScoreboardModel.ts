@@ -1,5 +1,5 @@
 import { Schema, model, type Types } from 'mongoose'
-import type { MatchRules, ScoreboardPhase, ScoreboardStatus, SideKey } from '@sensei-hub/shared'
+import type { MatchRules, ScoreboardPhase, ScoreboardStatus, SideKey } from '@arena/shared'
 import { matchRulesSchemaDefinition } from './DivisionTemplateModel.js'
 
 // Live scoreboard for one match. Athlete names (both the full one for the

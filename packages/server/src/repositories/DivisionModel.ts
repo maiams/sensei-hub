@@ -1,5 +1,5 @@
 import { Schema, model, type Types } from 'mongoose'
-import type { MatchRules } from '@sensei-hub/shared'
+import type { MatchRules } from '@arena/shared'
 import { matchRulesSchemaDefinition } from './DivisionTemplateModel.js'
 
 export interface DivisionDocument {

@@ -1,5 +1,5 @@
 import { Schema, model, type Types } from 'mongoose'
-import type { EventEntryStatus, RegistrationMethod } from '@sensei-hub/shared'
+import type { EventEntryStatus, RegistrationMethod } from '@arena/shared'
 
 export interface EventEntryDocument {
   _id: Types.ObjectId

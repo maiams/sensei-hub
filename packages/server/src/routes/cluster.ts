@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
-import { ClusterJoinRequest, type ClusterStatusDTO } from '@sensei-hub/shared'
+import { ClusterJoinRequest, type ClusterStatusDTO } from '@arena/shared'
 import { ClusterManager, ClusterManagerError } from '../cluster/ClusterManager.js'
 import { authenticate } from '@sensei-hub/core-server'
 import { authorize } from '@sensei-hub/core-server'

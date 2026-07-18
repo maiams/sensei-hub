@@ -3,7 +3,7 @@
 // domain/scoreboard/rules.ts: every branch here is unit-testable without a
 // real replica set.
 
-import type { ClusterNodeDTO, ClusterNodeHealth, ClusterNodeRole, ClusterStatusDTO } from '@sensei-hub/shared'
+import type { ClusterNodeDTO, ClusterNodeHealth, ClusterNodeRole, ClusterStatusDTO } from '@arena/shared'
 
 export interface DiscoveredPeer {
   host: string // this peer's own mongod "ip:port"

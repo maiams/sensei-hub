@@ -5,8 +5,8 @@ import { DivisionGroupModel } from '../repositories/DivisionGroupModel.js'
 import { EventEntryModel } from '../repositories/EventEntryModel.js'
 import { AuditLogModel } from '@sensei-hub/core-server'
 import type { EventCtx } from './EventService.js'
-import { CBJ_DEFAULT_MATCH_RULES } from '@sensei-hub/shared'
-import type { CreateDivisionInput, UpdateDivisionInput, ImportDivisionsFromTemplatesInput } from '@sensei-hub/shared'
+import { CBJ_DEFAULT_MATCH_RULES } from '@arena/shared'
+import type { CreateDivisionInput, UpdateDivisionInput, ImportDivisionsFromTemplatesInput } from '@arena/shared'
 
 export class DivisionService {
   async listDivisions(eventId: string, academyId: string) {

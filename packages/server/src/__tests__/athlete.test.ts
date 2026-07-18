@@ -4,7 +4,8 @@ import { buildApp } from '../app.js'
 import { AcademyModel } from '@sensei-hub/core-server'
 import { GuardianModel } from '../repositories/GuardianModel.js'
 import { AthleteService } from '../services/AthleteService.js'
-import { BELT_VALUES, CreateAthleteInput } from '@sensei-hub/shared'
+import { BELT_VALUES } from '@sensei-hub/shared'
+import { CreateAthleteInput } from '@dojo/shared'
 import type { FastifyInstance } from 'fastify'
 
 let app: FastifyInstance

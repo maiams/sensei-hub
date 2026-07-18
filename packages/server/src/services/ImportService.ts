@@ -9,7 +9,8 @@ import { ImportJobModel, type ImportJobDocument } from '../repositories/ImportJo
 import { AuditLogModel } from '@sensei-hub/core-server'
 import { AthleteService, isMinor } from './AthleteService.js'
 import type { AuthCtx } from '@sensei-hub/core-server'
-import { isValidCPF, type Belt, type Gender, type ImportRowError } from '@sensei-hub/shared'
+import { isValidCPF, type Belt, type Gender } from '@sensei-hub/shared'
+import { type ImportRowError } from '@arena/shared'
 
 // Fixed column order (A–N) — position matters, header text is a label only.
 // No "categoria" column: which Division the athlete lands in is derived from

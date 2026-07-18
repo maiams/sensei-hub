@@ -1,20 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { z } from 'zod'
-import {
-  CreateEventInput,
-  UpdateEventInput,
-  CreateDivisionInput,
-  UpdateDivisionInput,
-  ImportDivisionsFromTemplatesInput,
-  CreateEventEntryInput,
-  RecordWeighInInput,
-  ConfirmEntryInput,
-  WithdrawEntryInput,
-  EventEntryStatus,
-  GenerateBracketInput,
-  RecordMatchResultInput,
-  CorrectMatchResultInput,
-} from '@sensei-hub/shared'
+import { CreateEventInput, UpdateEventInput, CreateDivisionInput, UpdateDivisionInput, ImportDivisionsFromTemplatesInput, CreateEventEntryInput, RecordWeighInInput, ConfirmEntryInput, WithdrawEntryInput, EventEntryStatus, GenerateBracketInput, RecordMatchResultInput, CorrectMatchResultInput } from '@arena/shared'
 import { EventService, EventServiceError } from '../services/EventService.js'
 import { DivisionService, DivisionServiceError } from '../services/DivisionService.js'
 import { EventEntryService, EventEntryServiceError } from '../services/EventEntryService.js'

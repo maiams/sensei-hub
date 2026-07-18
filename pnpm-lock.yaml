@@ -15,6 +15,32 @@ importers:
         specifier: ^5.8.3
         version: 5.9.3
 
+  apps/arena/shared:
+    dependencies:
+      '@sensei-hub/shared':
+        specifier: workspace:*
+        version: link:../../../packages/shared
+      zod:
+        specifier: ^3.25.67
+        version: 3.25.76
+    devDependencies:
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
+  apps/dojo/shared:
+    dependencies:
+      '@sensei-hub/shared':
+        specifier: workspace:*
+        version: link:../../../packages/shared
+      zod:
+        specifier: ^3.25.67
+        version: 3.25.76
+    devDependencies:
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
   packages/app:
     dependencies:
       electron-updater:
@@ -79,6 +105,12 @@ importers:
 
   packages/server:
     dependencies:
+      '@arena/shared':
+        specifier: workspace:*
+        version: link:../../apps/arena/shared
+      '@dojo/shared':
+        specifier: workspace:*
+        version: link:../../apps/dojo/shared
       '@fastify/cors':
         specifier: ^10.0.2
         version: 10.1.0
@@ -153,6 +185,12 @@ importers:
 
   packages/web:
     dependencies:
+      '@arena/shared':
+        specifier: workspace:*
+        version: link:../../apps/arena/shared
+      '@dojo/shared':
+        specifier: workspace:*
+        version: link:../../apps/dojo/shared
       '@sensei-hub/shared':
         specifier: workspace:*
         version: link:../shared

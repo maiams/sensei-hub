@@ -1,5 +1,5 @@
 import { Schema, model, type Types } from 'mongoose'
-import type { EventStatus, OverweightPolicy } from '@sensei-hub/shared'
+import type { EventStatus, OverweightPolicy } from '@arena/shared'
 
 export interface EventDocument {
   _id: Types.ObjectId

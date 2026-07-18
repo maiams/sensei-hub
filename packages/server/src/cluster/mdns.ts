@@ -13,7 +13,7 @@
 // That's a deliberate trade-off for less code, not an oversight.
 
 import createMdns, { type MulticastDNS, type QueryPacket, type ResponsePacket } from 'multicast-dns'
-import type { ClusterNodeRole } from '@sensei-hub/shared'
+import type { ClusterNodeRole } from '@arena/shared'
 import type { DiscoveredPeer } from './rules.js'
 
 const SERVICE_TYPE = '_senseihub._tcp.local'

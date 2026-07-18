@@ -1,4 +1,4 @@
-import type { MatchRules, ScoreType, SideScore, ScoreboardPhase } from '@sensei-hub/shared'
+import type { MatchRules, ScoreType, SideScore, ScoreboardPhase } from '@arena/shared'
 
 // Pure judo scoring rules (no I/O, no Mongoose) — same guarantee as
 // domain/bracket. Rules per CBJ RNC 2025: ippon ends the fight; a 2nd

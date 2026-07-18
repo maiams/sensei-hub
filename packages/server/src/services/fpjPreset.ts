@@ -1,4 +1,4 @@
-import type { MatchRules, WeightCategoryRow } from '@sensei-hub/shared'
+import type { MatchRules, WeightCategoryRow } from '@arena/shared'
 
 // Static seed data, no I/O. Source: FPJ (Federação Paulista de Judô) "Tabelas de
 // Classes e Categorias 2026" (Divisão Aspirante, v2, 03/02/2026, https://fpj.com.br),

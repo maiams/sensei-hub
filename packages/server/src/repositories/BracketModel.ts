@@ -1,5 +1,5 @@
 import { Schema, model, type Types } from 'mongoose'
-import type { BracketFormat, BracketSize, RepechageType } from '@sensei-hub/shared'
+import type { BracketFormat, BracketSize, RepechageType } from '@arena/shared'
 
 export interface BracketAthleteSlotSub {
   athleteId: Types.ObjectId

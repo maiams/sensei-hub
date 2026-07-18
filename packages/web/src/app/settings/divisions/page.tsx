@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
-import { hasMinRole, type MatchRules, type UserRole } from '@sensei-hub/shared'
+import { hasMinRole, type UserRole } from '@sensei-hub/shared'
+import { type MatchRules } from '@arena/shared'
 import { apiFetch, ApiError, getCurrentRole, isLoggedIn } from '../../../lib/api'
 import { translateApiError } from '../../../lib/labels'
 import { WeightCategoryGrid, type GroupDraft } from '../../../components/WeightCategoryGrid'

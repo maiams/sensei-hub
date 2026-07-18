@@ -11,6 +11,8 @@
     "clean": "rm -rf .next out"
   },
   "dependencies": {
+    "@arena/shared": "workspace:*",
+    "@dojo/shared": "workspace:*",
     "@sensei-hub/shared": "workspace:*",
     "@serwist/next": "^9.5.11",
     "idb": "^8.0.3",

@@ -10,7 +10,7 @@ import { RodizioEngine } from '../domain/bracket/RodizioEngine.js'
 import { BracketEngineError } from '../domain/bracket/types.js'
 import type { AthleteSlot, BracketConfig, BracketEngine, BracketState, Match as EngineMatch } from '../domain/bracket/types.js'
 import type { AuthCtx } from '@sensei-hub/core-server'
-import type { CorrectMatchResultInput, GenerateBracketInput, RecordMatchResultInput } from '@sensei-hub/shared'
+import type { CorrectMatchResultInput, GenerateBracketInput, RecordMatchResultInput } from '@arena/shared'
 
 export class BracketService {
   async generateBracket(

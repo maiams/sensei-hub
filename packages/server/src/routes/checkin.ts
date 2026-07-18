@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
-import { CheckInInput, UndoCheckInInput } from '@sensei-hub/shared'
+import { CheckInInput, UndoCheckInInput } from '@arena/shared'
 import { CheckInService, CheckInServiceError } from '../services/CheckInService.js'
 import { scaleAdapter } from '../adapters/ScaleAdapter.js'
 import { authenticate } from '@sensei-hub/core-server'

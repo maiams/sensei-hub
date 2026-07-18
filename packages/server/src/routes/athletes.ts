@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
-import { CreateAthleteInput, UpdateAthleteInput, CreateBeltRecordInput, RecordWeightInput, CorrectWeightInput, CreateGuardianInput } from '@sensei-hub/shared'
+import { CreateAthleteInput, UpdateAthleteInput, CreateBeltRecordInput, RecordWeightInput, CorrectWeightInput, CreateGuardianInput } from '@dojo/shared'
 import { AthleteService, AthleteServiceError } from '../services/AthleteService.js'
 import { WeightService, WeightServiceError } from '../services/WeightService.js'
 import { authenticate } from '@sensei-hub/core-server'

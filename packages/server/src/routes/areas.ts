@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
-import { CreateAreaInput, UpdateAreaInput, CloseAreaInput, ForceMatchInput } from '@sensei-hub/shared'
+import { CreateAreaInput, UpdateAreaInput, CloseAreaInput, ForceMatchInput } from '@arena/shared'
 import { AreaService, AreaServiceError } from '../services/AreaService.js'
 import { MatchDispatchService, MatchDispatchServiceError } from '../services/MatchDispatchService.js'
 import { authenticate } from '@sensei-hub/core-server'

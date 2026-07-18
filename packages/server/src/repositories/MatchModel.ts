@@ -1,5 +1,5 @@
 import { Schema, model, type Types } from 'mongoose'
-import type { MatchStage } from '@sensei-hub/shared'
+import type { MatchStage } from '@arena/shared'
 
 export interface MatchResultSub {
   winnerId: Types.ObjectId

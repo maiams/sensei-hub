@@ -6,7 +6,7 @@ import { EventEntryModel } from '../repositories/EventEntryModel.js'
 import { AuditLogModel } from '@sensei-hub/core-server'
 import { EventEntryService } from './EventEntryService.js'
 import type { AuthCtx } from '@sensei-hub/core-server'
-import type { AttendanceDTO, CheckInMethod } from '@sensei-hub/shared'
+import type { AttendanceDTO, CheckInMethod } from '@arena/shared'
 
 // Physical presence check-in — separate from EventEntry (per-division
 // registration progress, Fase 3A). One Attendance record per athlete per

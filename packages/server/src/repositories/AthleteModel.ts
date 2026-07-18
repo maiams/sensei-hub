@@ -1,5 +1,6 @@
 import { Schema, model, type Types } from 'mongoose'
-import { BELT_VALUES, type AthleteScope, type AthleteStatus, type Gender, type Belt } from '@sensei-hub/shared'
+import { BELT_VALUES, type Gender, type Belt } from '@sensei-hub/shared'
+import { type AthleteScope, type AthleteStatus } from '@dojo/shared'
 
 export interface AthleteDocument {
   _id: Types.ObjectId

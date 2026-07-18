@@ -8,7 +8,7 @@ import {
   EMPTY_SIDE_SCORE,
   ScoreboardRulesError,
 } from '../domain/scoreboard/rules.js'
-import { CBJ_DEFAULT_MATCH_RULES } from '@sensei-hub/shared'
+import { CBJ_DEFAULT_MATCH_RULES } from '@arena/shared'
 
 describe('scoreboard rules (pure)', () => {
   it('second waza-ari is awasete-ippon, and removing one undoes it', () => {
