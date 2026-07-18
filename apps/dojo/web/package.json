@@ -1,0 +1,30 @@
+{
+  "name": "@dojo/web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --port 3100",
+    "build": "next build",
+    "start": "next start --port 3100",
+    "typecheck": "tsc --noEmit",
+    "lint": "next lint",
+    "clean": "rm -rf .next out"
+  },
+  "dependencies": {
+    "@dojo/shared": "workspace:*",
+    "@sensei-hub/core-web": "workspace:*",
+    "@sensei-hub/shared": "workspace:*",
+    "next": "^15.3.3",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "zod": "^3.25.67"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.11",
+    "@types/node": "^24.0.10",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.5",
+    "tailwindcss": "^4.1.11",
+    "typescript": "^5.8.3"
+  }
+}

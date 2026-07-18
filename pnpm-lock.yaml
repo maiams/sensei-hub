@@ -89,6 +89,58 @@ importers:
         specifier: ^5.8.3
         version: 5.9.3
 
+  apps/arena/web:
+    dependencies:
+      '@arena/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@sensei-hub/core-web':
+        specifier: workspace:*
+        version: link:../../../packages/core-web
+      '@sensei-hub/shared':
+        specifier: workspace:*
+        version: link:../../../packages/shared
+      '@serwist/next':
+        specifier: ^9.5.11
+        version: 9.5.11(next@15.5.19(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react@19.2.7)(typescript@5.9.3)
+      idb:
+        specifier: ^8.0.3
+        version: 8.0.3
+      next:
+        specifier: ^15.3.3
+        version: 15.5.19(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      react:
+        specifier: ^19.1.0
+        version: 19.2.7
+      react-dom:
+        specifier: ^19.1.0
+        version: 19.2.7(react@19.2.7)
+      serwist:
+        specifier: ^9.5.11
+        version: 9.5.11(browserslist@4.28.2)(typescript@5.9.3)
+      zod:
+        specifier: ^3.25.67
+        version: 3.25.76
+    devDependencies:
+      '@tailwindcss/postcss':
+        specifier: ^4.1.11
+        version: 4.3.2
+      '@types/node':
+        specifier: ^24.0.10
+        version: 24.13.2
+      '@types/react':
+        specifier: ^19.1.8
+        version: 19.2.17
+      '@types/react-dom':
+        specifier: ^19.1.5
+        version: 19.2.3(@types/react@19.2.17)
+      tailwindcss:
+        specifier: ^4.1.11
+        version: 4.3.2
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
   apps/dojo/server:
     dependencies:
       '@dojo/shared':
@@ -169,6 +221,49 @@ importers:
         specifier: ^5.8.3
         version: 5.9.3
 
+  apps/dojo/web:
+    dependencies:
+      '@dojo/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@sensei-hub/core-web':
+        specifier: workspace:*
+        version: link:../../../packages/core-web
+      '@sensei-hub/shared':
+        specifier: workspace:*
+        version: link:../../../packages/shared
+      next:
+        specifier: ^15.3.3
+        version: 15.5.19(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      react:
+        specifier: ^19.1.0
+        version: 19.2.7
+      react-dom:
+        specifier: ^19.1.0
+        version: 19.2.7(react@19.2.7)
+      zod:
+        specifier: ^3.25.67
+        version: 3.25.76
+    devDependencies:
+      '@tailwindcss/postcss':
+        specifier: ^4.1.11
+        version: 4.3.2
+      '@types/node':
+        specifier: ^24.0.10
+        version: 24.13.2
+      '@types/react':
+        specifier: ^19.1.8
+        version: 19.2.17
+      '@types/react-dom':
+        specifier: ^19.1.5
+        version: 19.2.3(@types/react@19.2.17)
+      tailwindcss:
+        specifier: ^4.1.11
+        version: 4.3.2
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
   packages/app:
     dependencies:
       electron-updater:
@@ -231,64 +326,31 @@ importers:
         specifier: ^5.8.3
         version: 5.9.3
 
-  packages/shared:
+  packages/core-web:
     dependencies:
-      zod:
-        specifier: ^3.25.67
-        version: 3.25.76
-    devDependencies:
-      typescript:
-        specifier: ^5.8.3
-        version: 5.9.3
-
-  packages/web:
-    dependencies:
-      '@arena/shared':
-        specifier: workspace:*
-        version: link:../../apps/arena/shared
-      '@dojo/shared':
-        specifier: workspace:*
-        version: link:../../apps/dojo/shared
       '@sensei-hub/shared':
         specifier: workspace:*
         version: link:../shared
-      '@serwist/next':
-        specifier: ^9.5.11
-        version: 9.5.11(next@15.5.19(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(react@19.2.7)(typescript@5.9.3)
-      idb:
-        specifier: ^8.0.3
-        version: 8.0.3
+    devDependencies:
+      '@types/react':
+        specifier: ^19.1.8
+        version: 19.2.17
       next:
         specifier: ^15.3.3
         version: 15.5.19(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       react:
         specifier: ^19.1.0
         version: 19.2.7
-      react-dom:
-        specifier: ^19.1.0
-        version: 19.2.7(react@19.2.7)
-      serwist:
-        specifier: ^9.5.11
-        version: 9.5.11(browserslist@4.28.2)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
+  packages/shared:
+    dependencies:
       zod:
         specifier: ^3.25.67
         version: 3.25.76
     devDependencies:
-      '@tailwindcss/postcss':
-        specifier: ^4.1.11
-        version: 4.3.2
-      '@types/node':
-        specifier: ^24.0.10
-        version: 24.13.2
-      '@types/react':
-        specifier: ^19.1.8
-        version: 19.2.17
-      '@types/react-dom':
-        specifier: ^19.1.5
-        version: 19.2.3(@types/react@19.2.17)
-      tailwindcss:
-        specifier: ^4.1.11
-        version: 4.3.2
       typescript:
         specifier: ^5.8.3
         version: 5.9.3

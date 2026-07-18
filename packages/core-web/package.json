@@ -1,0 +1,25 @@
+{
+  "name": "@sensei-hub/core-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@sensei-hub/shared": "workspace:*"
+  },
+  "peerDependencies": {
+    "next": "^15.3.3",
+    "react": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.8",
+    "next": "^15.3.3",
+    "react": "^19.1.0",
+    "typescript": "^5.8.3"
+  }
+}

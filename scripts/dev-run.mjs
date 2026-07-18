@@ -13,10 +13,11 @@ if (process.platform !== SUPPORTED_PLATFORM) {
   process.exit(1)
 }
 
-// Qual produto subir: `pnpm dev:run [dojo|arena]` (default: arena, que tem a
-// maior superfície de API enquanto o web ainda é o monolito da Fase <E5).
+// Qual produto subir: `pnpm dev:run [dojo|arena]` (default: arena).
 const product = process.argv[2] === 'dojo' ? 'dojo' : 'arena'
 const serverFilter = product === 'dojo' ? '@dojo/server' : '@arena/server'
+const webFilter = product === 'dojo' ? '@dojo/web' : '@arena/web'
+const webPort = product === 'dojo' ? 3100 : 3000
 
 const requireFromServer = createRequire(
   new URL(`../apps/${product}/server/package.json`, import.meta.url),
@@ -115,9 +116,9 @@ try {
   console.log(`[dev:run] MongoDB pronto: ${mongodbUri}`)
 
   startPackage('servidor', serverFilter, { MONGODB_URI: mongodbUri })
-  startPackage('web', '@sensei-hub/web')
+  startPackage('web', webFilter)
 
-  console.log('[dev:run] Aplicacao iniciando em http://localhost:3000')
+  console.log(`[dev:run] ${product} iniciando em http://localhost:${webPort}`)
   console.log('[dev:run] Use Ctrl+C para encerrar tudo.')
 } catch (error) {
   console.error('[dev:run] Falha ao iniciar a aplicacao:', error)

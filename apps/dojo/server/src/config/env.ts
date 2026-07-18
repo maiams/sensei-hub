@@ -1,9 +1,9 @@
 import { createEnv } from '@sensei-hub/core-server'
 
-// Porta/DB ainda são os do monolito — mudam para os defaults do produto dojô
-// (3101 / senseihub_dojo / dojo-rs) quando o supervisor e o web forem
-// parametrizados por produto (E5/E6 do plano de separação).
+// Defaults do produto dojô — porta e banco distintos da arena para os dois
+// rodarem lado a lado na mesma máquina. O replica set single-node continua
+// obrigatório (transações do AthleteService).
 export const env = createEnv({
-  port: 3001,
-  mongodbUri: 'mongodb://127.0.0.1:27017/senseihub?replicaSet=sensei-rs',
+  port: 3101,
+  mongodbUri: 'mongodb://127.0.0.1:27117/senseihub_dojo?replicaSet=dojo-rs',
 })
