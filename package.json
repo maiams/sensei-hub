@@ -10,6 +10,9 @@
   "scripts": {
     "build": "turbo run build",
     "dev": "turbo run dev",
+    "dev:run": "node scripts/dev-run.mjs",
+    "package:app": "node scripts/package-app.mjs",
+    "fetch:mongodb": "node scripts/fetch-mongodb.mjs",
     "test": "turbo run test",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",

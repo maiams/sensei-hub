@@ -1,4 +1,7 @@
 node_modules/
+resources/mongodb/
+packages/server/deploy/
+packages/app/release/
 .env
 .env.local
 .env.*.local
@@ -12,3 +15,4 @@ dist/
 *.pdf
 next-env.d.ts
 *.tsbuildinfo
+.claude/worktrees/

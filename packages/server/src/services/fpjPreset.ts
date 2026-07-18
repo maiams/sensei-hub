@@ -1,4 +1,4 @@
-import type { WeightCategoryRow } from '@sensei-hub/shared'
+import type { MatchRules, WeightCategoryRow } from '@sensei-hub/shared'
 
 // Static seed data, no I/O. Source: FPJ (Federação Paulista de Judô) "Tabelas de
 // Classes e Categorias 2026" (Divisão Aspirante, v2, 03/02/2026, https://fpj.com.br),
@@ -18,9 +18,27 @@ export interface FpjPresetTemplate {
   label: string
   minAge: number
   maxAge: number | null
+  matchRules: MatchRules
   categories: {
     male: WeightCategoryRow[]
     female: WeightCategoryRow[]
+  }
+}
+
+// Fight-time defaults per age class, from CBJ RNC 2025 (v2, 25/03/2025), p.29:
+// Sub-13 = 2min, Sub-15 = 3min, Cadete/Júnior/Sub-23/Sênior = 4min; every class
+// has golden score with no time limit; osaekomi yuko 5s / waza-ari 10s / ippon
+// 20s for all classes. The RNC does not cover Sub-09/Sub-11 (CBJ classes start
+// at Sub-13) — those default to 2min like Sub-13, an assumption the academy can
+// edit like everything else here.
+function cbjRules(matchDurationSeconds: number): MatchRules {
+  return {
+    matchDurationSeconds,
+    goldenScoreEnabled: true,
+    goldenScoreDurationSeconds: null,
+    osaekomiYukoSeconds: 5,
+    osaekomiWazaariSeconds: 10,
+    osaekomiIpponSeconds: 20,
   }
 }
 
@@ -30,6 +48,7 @@ export const FPJ_PRESET_TEMPLATES: FpjPresetTemplate[] = [
     label: 'Pré-mirim (Sub-09)',
     minAge: 7,
     maxAge: 8,
+    matchRules: cbjRules(120),
     categories: {
       male: [
         { label: 'Super Ligeiro', maxKg: 23 },
@@ -62,6 +81,7 @@ export const FPJ_PRESET_TEMPLATES: FpjPresetTemplate[] = [
     label: 'Mirim (Sub-11)',
     minAge: 9,
     maxAge: 10,
+    matchRules: cbjRules(120),
     categories: {
       male: [
         { label: 'Super Ligeiro', maxKg: 28 },
@@ -94,6 +114,7 @@ export const FPJ_PRESET_TEMPLATES: FpjPresetTemplate[] = [
     label: 'Infantil (Sub-13)',
     minAge: 11,
     maxAge: 12,
+    matchRules: cbjRules(120),
     categories: {
       male: [
         { label: 'Super Ligeiro', maxKg: 35 },
@@ -124,6 +145,7 @@ export const FPJ_PRESET_TEMPLATES: FpjPresetTemplate[] = [
     label: 'Infanto-juvenil (Sub-15)',
     minAge: 13,
     maxAge: 14,
+    matchRules: cbjRules(180),
     categories: {
       male: [
         { label: 'Super Ligeiro', maxKg: 40 },
@@ -154,6 +176,7 @@ export const FPJ_PRESET_TEMPLATES: FpjPresetTemplate[] = [
     label: 'Juvenil (Cadete/Sub-18)',
     minAge: 15,
     maxAge: 17,
+    matchRules: cbjRules(240),
     categories: {
       male: [
         { label: 'Super Ligeiro', maxKg: 50 },
@@ -182,6 +205,7 @@ export const FPJ_PRESET_TEMPLATES: FpjPresetTemplate[] = [
     label: 'Adulto (Júnior, Sênior, Veteranos)',
     minAge: 18,
     maxAge: null,
+    matchRules: cbjRules(240),
     categories: {
       male: [
         { label: 'Ligeiro', maxKg: 60 },

@@ -2,7 +2,8 @@ import { DivisionTemplateModel, type DivisionTemplateDocument } from '../reposit
 import { DivisionGroupModel, type DivisionGroupDocument } from '../repositories/DivisionGroupModel.js'
 import { AuditLogModel } from '../repositories/AuditLogModel.js'
 import { FPJ_PRESET_TEMPLATES } from './fpjPreset.js'
-import type { CreateDivisionTemplateInput, UpdateDivisionTemplateInput, DivisionTemplateDTO, DivisionGroupDTO } from '@sensei-hub/shared'
+import { CBJ_DEFAULT_MATCH_RULES } from '@sensei-hub/shared'
+import type { CreateDivisionTemplateInput, UpdateDivisionTemplateInput, DivisionTemplateDTO } from '@sensei-hub/shared'
 
 export interface DivisionCtx {
   userId: string
@@ -46,6 +47,7 @@ export class DivisionTemplateService {
       label: input.label,
       minAge: input.minAge ?? null,
       maxAge: input.maxAge ?? null,
+      matchRules: input.matchRules ?? CBJ_DEFAULT_MATCH_RULES,
       order,
     })
 
@@ -82,6 +84,14 @@ export class DivisionTemplateService {
         auditEntries.push({ fieldName: field, oldValue, newValue })
         // @ts-expect-error — dynamic assignment across a known field union
         template[field] = newValue
+      }
+    }
+
+    if (input.matchRules !== undefined) {
+      const oldRules = template.matchRules ?? CBJ_DEFAULT_MATCH_RULES
+      if (JSON.stringify(oldRules) !== JSON.stringify(input.matchRules)) {
+        auditEntries.push({ fieldName: 'matchRules', oldValue: oldRules, newValue: input.matchRules })
+        template.matchRules = input.matchRules
       }
     }
 
@@ -153,6 +163,7 @@ export class DivisionTemplateService {
         label: preset.label,
         minAge: preset.minAge,
         maxAge: preset.maxAge,
+        matchRules: preset.matchRules,
         order: nextOrder++,
       })
 
@@ -212,6 +223,9 @@ export class DivisionTemplateService {
       label: template.label,
       minAge: template.minAge,
       maxAge: template.maxAge,
+      // Templates created before matchRules existed don't have the field —
+      // Mongoose doesn't backfill defaults on read, so fall back here.
+      matchRules: template.matchRules ?? CBJ_DEFAULT_MATCH_RULES,
       order: template.order,
       groups: groups.map((g) => ({
         id: g._id.toString(),

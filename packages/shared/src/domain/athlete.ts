@@ -6,11 +6,14 @@ export type AthleteScope = z.infer<typeof AthleteScope>
 export const AthleteStatus = z.enum(['active', 'inactive', 'suspended', 'pending'])
 export type AthleteStatus = z.infer<typeof AthleteStatus>
 
-export const Belt = z.enum([
-  'white', 'yellow', 'orange', 'green', 'blue', 'brown',
+export const BELT_VALUES = [
+  'white', 'burgundy', 'gray', 'blue', 'yellow', 'orange', 'green', 'purple', 'brown',
   'black-1dan', 'black-2dan', 'black-3dan', 'black-4dan', 'black-5dan',
-  'black-6dan', 'black-7dan', 'black-8dan', 'black-9dan', 'black-10dan',
-])
+  'coral-6dan', 'coral-7dan', 'coral-8dan',
+  'red-9dan', 'red-10dan',
+] as const
+
+export const Belt = z.enum(BELT_VALUES)
 export type Belt = z.infer<typeof Belt>
 
 export const Gender = z.enum(['male', 'female', 'not_informed'])
@@ -27,7 +30,14 @@ const AthleteWritableFields = {
   phone: z.string().optional(),
   cpf: z.string().optional(),             // unique per academy when present
   currentBelt: Belt,
-  federationNumber: z.string().optional(),
+  federationNumber: z.string().optional(), // FPJ; legacy field name kept for stored-data compatibility
+  zempoNumber: z.string().optional(),       // national CBJ registration in Zempo
+  // Home club/academy label — mainly for scope:'event-only' athletes imported
+  // from a visiting academy (Fase 3D). Distinct from `academyId`, which is
+  // always the single installed academy in this local-first deployment; the
+  // bracket engine's same-club separation reads this field when present, or
+  // falls back to `academyId` for the host academy's own athletes.
+  clubName: z.string().max(120).optional(),
   hasMedicalRestriction: z.boolean().default(false),
   medicalNotes: z.string().max(2000).optional(),   // select: false at the model level; coach+ only
   allergies: z.string().max(1000).optional(),      // select: false at the model level; coach+ only
@@ -97,6 +107,8 @@ export const AthleteDTO = z.object({
   phone: z.string().optional(),
   currentBelt: Belt,
   federationNumber: z.string().optional(),
+  zempoNumber: z.string().optional(),
+  clubName: z.string().max(120).optional(),
   latestWeightKg: z.number().positive().optional(),
   hasMedicalRestriction: z.boolean(),    // flag visible to staff; notes are role-restricted server-side
   medicalNotes: z.string().optional(),   // only present in the response for coach+ roles

@@ -333,6 +333,20 @@ export async function eventRoutes(app: FastifyInstance): Promise<void> {
     },
   )
 
+  app.get(
+    '/events/:id/divisions/:did/rankings',
+    { preHandler: [authenticate, authorize('staff')] },
+    async (request, reply) => {
+      const { id, did } = request.params as { id: string; did: string }
+      try {
+        const rankings = await bracketService.getRankings(id, request.authUser.academyId, did)
+        return reply.send(rankings)
+      } catch (err) {
+        return handleError(err, reply)
+      }
+    },
+  )
+
   app.post(
     '/events/:id/divisions/:did/matches/:mid/result',
     { preHandler: [authenticate, authorize('event_manager')] },

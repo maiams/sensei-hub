@@ -4,7 +4,8 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { hasMinRole, type UserRole } from '@sensei-hub/shared'
-import { apiFetch, ApiError, getCurrentRole, isLoggedIn } from '../../../lib/api'
+import { apiFetch, ApiError, getAccessToken, getCurrentRole, isLoggedIn } from '../../../lib/api'
+import { enqueueOfflineWrite } from '../../../lib/offlineQueue'
 import {
   EVENT_ENTRY_STATUS_LABELS,
   EVENT_STATUS_LABELS,
@@ -23,6 +24,7 @@ interface EventDTO {
   venue?: string
   status: string
   overweightPolicy: string
+  publicHideNamesUnderAge?: number | null
 }
 
 interface DivisionDTO {
@@ -56,6 +58,8 @@ export default function EventDetailPage() {
   const [canManage, setCanManage] = useState(false)
   const [canOperate, setCanOperate] = useState(false)
   const [canWeighIn, setCanWeighIn] = useState(false)
+  const [canCloseArea, setCanCloseArea] = useState(false)
+  const [entriesRefreshKey, setEntriesRefreshKey] = useState(0)
 
   const load = useCallback(async () => {
     try {
@@ -70,6 +74,11 @@ export default function EventDetailPage() {
     }
   }, [eventId])
 
+  const handleImported = useCallback(async () => {
+    await load()
+    setEntriesRefreshKey((k) => k + 1)
+  }, [load])
+
   useEffect(() => {
     if (!isLoggedIn()) {
       router.replace('/login')
@@ -79,6 +88,7 @@ export default function EventDetailPage() {
     setCanManage(role !== null && hasMinRole(role as UserRole, 'event_manager'))
     setCanOperate(role !== null && hasMinRole(role as UserRole, 'staff'))
     setCanWeighIn(role !== null && hasMinRole(role as UserRole, 'weigh_in_operator'))
+    setCanCloseArea(role !== null && hasMinRole(role as UserRole, 'scoreboard_operator'))
     void load()
   }, [router, load])
 
@@ -109,12 +119,22 @@ export default function EventDetailPage() {
 
         <DivisionsSection eventId={eventId} divisions={divisions} canManage={canManage} onChanged={load} />
 
+        <AreasSection
+          eventId={eventId}
+          divisions={divisions}
+          canManage={canManage}
+          canCloseArea={canCloseArea}
+        />
+
+        {canManage && <ImportSection eventId={eventId} onImported={handleImported} />}
+
         <EntriesSection
           eventId={eventId}
           divisions={divisions}
           canManage={canManage}
           canOperate={canOperate}
           canWeighIn={canWeighIn}
+          refreshKey={entriesRefreshKey}
         />
       </div>
     </main>
@@ -127,6 +147,11 @@ function EventHeader({ event, canManage, onChanged }: { event: EventDTO; canMana
   const [venue, setVenue] = useState(event.venue ?? '')
   const [status, setStatus] = useState(event.status)
   const [overweightPolicy, setOverweightPolicy] = useState(event.overweightPolicy)
+  const [hideUnderAge, setHideUnderAge] = useState(
+    event.publicHideNamesUnderAge === null || event.publicHideNamesUnderAge === undefined
+      ? ''
+      : String(event.publicHideNamesUnderAge),
+  )
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -136,7 +161,14 @@ function EventHeader({ event, canManage, onChanged }: { event: EventDTO; canMana
     try {
       await apiFetch(`/events/${event.id}`, {
         method: 'PATCH',
-        body: JSON.stringify({ name, eventDate, venue: venue || undefined, status, overweightPolicy }),
+        body: JSON.stringify({
+          name,
+          eventDate,
+          venue: venue || undefined,
+          status,
+          overweightPolicy,
+          publicHideNamesUnderAge: hideUnderAge.trim() === '' ? null : Number(hideUnderAge),
+        }),
       })
       onChanged()
     } catch (err) {
@@ -222,6 +254,24 @@ function EventHeader({ event, canManage, onChanged }: { event: EventDTO; canMana
             ))}
           </select>
         </div>
+        <div className="sm:col-span-2">
+          <label className="mb-1 block text-xs text-slate-500">
+            Ocultar nome de menores de (anos) em telas públicas
+          </label>
+          <input
+            type="number"
+            min="1"
+            max="21"
+            value={hideUnderAge}
+            onChange={(e) => setHideUnderAge(e.target.value)}
+            placeholder="vazio = mostrar nomes completos"
+            className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white placeholder-slate-500"
+          />
+          <p className="mt-1 text-xs text-slate-500">
+            Atletas abaixo dessa idade aparecem como &quot;Nome S.&quot; no telão e no placar público. Operadores sempre
+            veem o nome completo.
+          </p>
+        </div>
       </div>
       {error && <p className="mb-3 text-sm text-red-400">{error}</p>}
       <button
@@ -279,6 +329,13 @@ function DivisionsSection({
     <section>
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-lg font-semibold text-white">Divisões</h2>
+        <div className="flex gap-2">
+          <Link
+            href={`/events/${eventId}/print/weighin`}
+            className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-300 hover:bg-slate-800"
+          >
+            Ficha de pesagem
+          </Link>
         {canManage && (
           <div className="flex gap-2">
             <button
@@ -298,6 +355,7 @@ function DivisionsSection({
             </button>
           </div>
         )}
+        </div>
       </div>
 
       {error && <p className="mb-3 text-sm text-red-400">{error}</p>}
@@ -372,6 +430,14 @@ function DivisionRow({
           <p className="text-sm text-slate-500">
             {ageRangeLabel(division.minAge, division.maxAge)} · {weightLabel(division.weightLimitKg)}
             {division.sourceTemplateKey ? ' · do padrão' : ''}
+            {' · '}
+            <Link href={`/events/${eventId}/print/bracket/${division.id}`} className="underline decoration-dotted hover:text-slate-300">
+              chave
+            </Link>
+            {' · '}
+            <Link href={`/events/${eventId}/print/results/${division.id}`} className="underline decoration-dotted hover:text-slate-300">
+              resultado
+            </Link>
           </p>
         </div>
         {canManage && (
@@ -557,6 +623,600 @@ function NewDivisionForm({ eventId, onDone, onCreated }: { eventId: string; onDo
   )
 }
 
+interface AreaDTO {
+  id: string
+  name: string
+  allowedDivisionIds: string[] | null
+  status: 'open' | 'closed'
+  closedReason?: string
+}
+
+interface UnroutableMatchDTO {
+  id: string
+  matchNumber: number
+  divisionId: string
+}
+
+function AreasSection({
+  eventId,
+  divisions,
+  canManage,
+  canCloseArea,
+}: {
+  eventId: string
+  divisions: DivisionDTO[]
+  canManage: boolean
+  canCloseArea: boolean
+}) {
+  const [areas, setAreas] = useState<AreaDTO[] | null>(null)
+  const [unroutable, setUnroutable] = useState<UnroutableMatchDTO[]>([])
+  const [error, setError] = useState<string | null>(null)
+  const [addingArea, setAddingArea] = useState(false)
+
+  const load = useCallback(async () => {
+    try {
+      const [areasData, unroutableData] = await Promise.all([
+        apiFetch<AreaDTO[]>(`/events/${eventId}/areas`),
+        apiFetch<UnroutableMatchDTO[]>(`/events/${eventId}/areas/unroutable-matches`),
+      ])
+      setAreas(areasData)
+      setUnroutable(unroutableData)
+    } catch {
+      setError('Não foi possível carregar as áreas.')
+    }
+  }, [eventId])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  function divisionName(id: string): string {
+    return divisions.find((d) => d.id === id)?.name ?? id
+  }
+
+  return (
+    <section>
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="text-lg font-semibold text-white">Áreas (mesas)</h2>
+        <div className="flex gap-2">
+          <Link
+            href={`/display/events/${eventId}`}
+            target="_blank"
+            className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-300 hover:bg-slate-800"
+          >
+            Telão do evento
+          </Link>
+          {canCloseArea && (
+            <Link
+              href={`/events/${eventId}/operate`}
+              className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-300 hover:bg-slate-800"
+            >
+              Operar mesa
+            </Link>
+          )}
+          {canManage && !addingArea && (
+            <button
+              type="button"
+              onClick={() => setAddingArea(true)}
+              className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-blue-500"
+            >
+              + Criar área
+            </button>
+          )}
+        </div>
+      </div>
+
+      {error && <p className="mb-3 text-sm text-red-400">{error}</p>}
+
+      {unroutable.length > 0 && (
+        <p className="mb-3 rounded-lg border border-amber-800 bg-amber-950/40 px-3 py-2 text-sm text-amber-300">
+          {unroutable.length} luta(s) sem área disponível no momento — reabra a área correspondente ou libere a
+          divisão em outra área aberta.
+        </p>
+      )}
+
+      {areas === null && <p className="text-sm text-slate-400">Carregando…</p>}
+      {areas && areas.length === 0 && !addingArea && <p className="text-sm text-slate-500">Nenhuma área criada ainda.</p>}
+
+      <div className="space-y-2">
+        {areas?.map((a) => (
+          <AreaRow
+            key={a.id}
+            eventId={eventId}
+            area={a}
+            divisions={divisions}
+            canManage={canManage}
+            canCloseArea={canCloseArea}
+            divisionName={divisionName}
+            onChanged={load}
+          />
+        ))}
+      </div>
+
+      {canManage && addingArea && (
+        <NewAreaForm eventId={eventId} divisions={divisions} onDone={() => setAddingArea(false)} onCreated={load} />
+      )}
+    </section>
+  )
+}
+
+function AreaRow({
+  eventId,
+  area,
+  divisions,
+  canManage,
+  canCloseArea,
+  divisionName,
+  onChanged,
+}: {
+  eventId: string
+  area: AreaDTO
+  divisions: DivisionDTO[]
+  canManage: boolean
+  canCloseArea: boolean
+  divisionName: (id: string) => string
+  onChanged: () => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [name, setName] = useState(area.name)
+  const [anyDivision, setAnyDivision] = useState(area.allowedDivisionIds === null)
+  const [selectedDivisionIds, setSelectedDivisionIds] = useState<string[]>(area.allowedDivisionIds ?? [])
+  const [showClose, setShowClose] = useState(false)
+  const [closeReason, setCloseReason] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function run(action: () => Promise<unknown>) {
+    setLoading(true)
+    setError(null)
+    try {
+      await action()
+      onChanged()
+    } catch (err) {
+      setError(err instanceof ApiError ? translateApiError(err.message) : 'Não foi possível concluir a ação.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function handleSave() {
+    await run(() =>
+      apiFetch(`/events/${eventId}/areas/${area.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ name, allowedDivisionIds: anyDivision ? null : selectedDivisionIds }),
+      }),
+    )
+    setEditing(false)
+  }
+
+  async function handleDelete() {
+    if (!window.confirm(`Apagar a área "${area.name}"?`)) return
+    await run(() => apiFetch(`/events/${eventId}/areas/${area.id}`, { method: 'DELETE' }))
+  }
+
+  async function handleClose() {
+    await run(() =>
+      apiFetch(`/events/${eventId}/areas/${area.id}/close`, {
+        method: 'PATCH',
+        body: JSON.stringify({ reason: closeReason }),
+      }),
+    )
+    setShowClose(false)
+  }
+
+  async function handleReopen() {
+    await run(() => apiFetch(`/events/${eventId}/areas/${area.id}/reopen`, { method: 'PATCH' }))
+  }
+
+  function toggleDivision(id: string) {
+    setSelectedDivisionIds((current) => (current.includes(id) ? current.filter((d) => d !== id) : [...current, id]))
+  }
+
+  if (editing) {
+    return (
+      <div className="rounded-lg border border-slate-800 bg-slate-900 p-4">
+        <div className="mb-3">
+          <label className="mb-1 block text-xs text-slate-500">Nome</label>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+          />
+        </div>
+        <div className="mb-3">
+          <label className="flex items-center gap-2 text-sm text-slate-300">
+            <input type="checkbox" checked={anyDivision} onChange={(e) => setAnyDivision(e.target.checked)} />
+            Aceita qualquer divisão
+          </label>
+          {!anyDivision && (
+            <div className="mt-2 space-y-1 rounded-lg border border-slate-800 bg-slate-950 p-2">
+              {divisions.length === 0 && <p className="text-xs text-slate-500">Nenhuma divisão criada ainda.</p>}
+              {divisions.map((d) => (
+                <label key={d.id} className="flex items-center gap-2 text-sm text-slate-300">
+                  <input
+                    type="checkbox"
+                    checked={selectedDivisionIds.includes(d.id)}
+                    onChange={() => toggleDivision(d.id)}
+                  />
+                  {d.name}
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
+        {error && <p className="mb-2 text-sm text-red-400">{error}</p>}
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={loading}
+            className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-500 disabled:opacity-60"
+          >
+            Salvar
+          </button>
+          <button
+            type="button"
+            onClick={() => setEditing(false)}
+            className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800"
+          >
+            Cancelar
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="rounded-lg border border-slate-800 bg-slate-900 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="font-medium text-white">{area.name}</p>
+          <p className="text-sm text-slate-500">
+            {area.allowedDivisionIds === null
+              ? 'Aceita qualquer divisão'
+              : area.allowedDivisionIds.length === 0
+                ? 'Nenhuma divisão permitida'
+                : area.allowedDivisionIds.map(divisionName).join(', ')}
+          </p>
+          {area.status === 'closed' && area.closedReason && (
+            <p className="text-sm text-amber-400">Fechada: {area.closedReason}</p>
+          )}
+        </div>
+        <span
+          className={`rounded-full border px-3 py-1 text-xs font-medium ${
+            area.status === 'open' ? 'border-emerald-800 text-emerald-300' : 'border-slate-700 text-slate-400'
+          }`}
+        >
+          {area.status === 'open' ? 'Aberta' : 'Fechada'}
+        </span>
+      </div>
+
+      {error && <p className="mt-2 text-sm text-red-400">{error}</p>}
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        {canManage && (
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800"
+          >
+            Editar
+          </button>
+        )}
+        {canManage && (
+          <button
+            type="button"
+            onClick={handleDelete}
+            disabled={loading}
+            className="rounded-lg border border-red-900 px-3 py-1.5 text-sm text-red-400 hover:bg-red-950 disabled:opacity-60"
+          >
+            Apagar
+          </button>
+        )}
+
+        {canCloseArea && area.status === 'open' && !showClose && (
+          <button
+            type="button"
+            onClick={() => setShowClose(true)}
+            className="rounded-lg border border-amber-800 px-3 py-1.5 text-sm text-amber-300 hover:bg-amber-950"
+          >
+            Fechar
+          </button>
+        )}
+        {canCloseArea && showClose && (
+          <div className="flex items-center gap-2">
+            <input
+              autoFocus
+              value={closeReason}
+              onChange={(e) => setCloseReason(e.target.value)}
+              placeholder="Motivo (ex: almoço)"
+              className="w-48 rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-sm text-white placeholder-slate-500"
+            />
+            <button
+              type="button"
+              onClick={handleClose}
+              disabled={loading || closeReason.trim().length < 3}
+              className="rounded-lg bg-amber-700 px-3 py-1.5 text-sm font-semibold text-white hover:bg-amber-600 disabled:opacity-60"
+            >
+              Confirmar
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowClose(false)}
+              className="text-sm text-slate-400 hover:text-slate-200"
+            >
+              Cancelar
+            </button>
+          </div>
+        )}
+
+        {canManage && area.status === 'closed' && (
+          <button
+            type="button"
+            onClick={handleReopen}
+            disabled={loading}
+            className="rounded-lg border border-emerald-800 px-3 py-1.5 text-sm text-emerald-300 hover:bg-emerald-950 disabled:opacity-60"
+          >
+            Reabrir
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function NewAreaForm({
+  eventId,
+  divisions,
+  onDone,
+  onCreated,
+}: {
+  eventId: string
+  divisions: DivisionDTO[]
+  onDone: () => void
+  onCreated: () => void
+}) {
+  const [name, setName] = useState('')
+  const [anyDivision, setAnyDivision] = useState(true)
+  const [selectedDivisionIds, setSelectedDivisionIds] = useState<string[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  function toggleDivision(id: string) {
+    setSelectedDivisionIds((current) => (current.includes(id) ? current.filter((d) => d !== id) : [...current, id]))
+  }
+
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    setLoading(true)
+    setError(null)
+    try {
+      await apiFetch(`/events/${eventId}/areas`, {
+        method: 'POST',
+        body: JSON.stringify({ name, allowedDivisionIds: anyDivision ? undefined : selectedDivisionIds }),
+      })
+      onCreated()
+      onDone()
+    } catch (err) {
+      setError(err instanceof ApiError ? translateApiError(err.message) : 'Não foi possível criar.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="mt-3 rounded-lg border border-slate-800 bg-slate-900 p-4">
+      <div className="mb-3">
+        <label className="mb-1 block text-xs text-slate-500">Nome</label>
+        <input
+          required
+          autoFocus
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Ex: Mesa 1"
+          className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-500"
+        />
+      </div>
+      <div className="mb-3">
+        <label className="flex items-center gap-2 text-sm text-slate-300">
+          <input type="checkbox" checked={anyDivision} onChange={(e) => setAnyDivision(e.target.checked)} />
+          Aceita qualquer divisão
+        </label>
+        {!anyDivision && (
+          <div className="mt-2 space-y-1 rounded-lg border border-slate-800 bg-slate-950 p-2">
+            {divisions.length === 0 && <p className="text-xs text-slate-500">Nenhuma divisão criada ainda.</p>}
+            {divisions.map((d) => (
+              <label key={d.id} className="flex items-center gap-2 text-sm text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={selectedDivisionIds.includes(d.id)}
+                  onChange={() => toggleDivision(d.id)}
+                />
+                {d.name}
+              </label>
+            ))}
+          </div>
+        )}
+      </div>
+      {error && <p className="mb-2 text-sm text-red-400">{error}</p>}
+      <div className="flex gap-2">
+        <button
+          type="submit"
+          disabled={loading}
+          className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-500 disabled:opacity-60"
+        >
+          Criar
+        </button>
+        <button
+          type="button"
+          onClick={onDone}
+          className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800"
+        >
+          Cancelar
+        </button>
+      </div>
+    </form>
+  )
+}
+
+interface ImportRowErrorDTO {
+  row: number
+  field?: string
+  message: string
+}
+
+interface ImportJobDTO {
+  id: string
+  filename: string
+  importedAt: string
+  totalRows: number
+  successCount: number
+  errorCount: number
+  errors: ImportRowErrorDTO[]
+}
+
+function ImportSection({ eventId, onImported }: { eventId: string; onImported: () => Promise<void> }) {
+  const [jobs, setJobs] = useState<ImportJobDTO[] | null>(null)
+  const [file, setFile] = useState<File | null>(null)
+  const [uploading, setUploading] = useState(false)
+  const [downloading, setDownloading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [expandedJobId, setExpandedJobId] = useState<string | null>(null)
+
+  const loadJobs = useCallback(async () => {
+    try {
+      const data = await apiFetch<ImportJobDTO[]>(`/events/${eventId}/import/jobs`)
+      setJobs(data)
+    } catch {
+      setJobs([])
+    }
+  }, [eventId])
+
+  useEffect(() => {
+    void loadJobs()
+  }, [loadJobs])
+
+  async function handleDownloadTemplate() {
+    setDownloading(true)
+    setError(null)
+    try {
+      const token = getAccessToken()
+      const res = await fetch(`/api/events/${eventId}/import/template`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      if (!res.ok) throw new Error()
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = 'modelo-importacao-atletas.xlsx'
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch {
+      setError('Não foi possível baixar o modelo.')
+    } finally {
+      setDownloading(false)
+    }
+  }
+
+  async function handleUpload() {
+    if (!file) return
+    setUploading(true)
+    setError(null)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const job = await apiFetch<ImportJobDTO>(`/events/${eventId}/import`, { method: 'POST', body: formData })
+      setFile(null)
+      setExpandedJobId(job.id)
+      await loadJobs()
+      await onImported()
+    } catch (err) {
+      setError(err instanceof ApiError ? translateApiError(err.message) : 'Não foi possível importar a planilha.')
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  return (
+    <section>
+      <h2 className="mb-3 text-lg font-semibold text-white">Importar planilha de atletas</h2>
+
+      <div className="rounded-lg border border-slate-800 bg-slate-900 p-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={handleDownloadTemplate}
+            disabled={downloading}
+            className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-300 hover:bg-slate-800 disabled:opacity-60"
+          >
+            Baixar modelo (.xlsx)
+          </button>
+          <input
+            type="file"
+            accept=".xlsx"
+            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            className="text-sm text-slate-300 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-800 file:px-3 file:py-1.5 file:text-sm file:text-slate-300"
+          />
+          <button
+            type="button"
+            onClick={handleUpload}
+            disabled={!file || uploading}
+            className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:opacity-60"
+          >
+            {uploading ? 'Importando…' : 'Importar'}
+          </button>
+        </div>
+
+        {error && <p className="mt-3 text-sm text-red-400">{error}</p>}
+
+        {jobs && jobs.length > 0 && (
+          <ul className="mt-4 space-y-2">
+            {jobs.map((job) => (
+              <li key={job.id} className="rounded-lg border border-slate-800 bg-slate-950 p-3">
+                <button
+                  type="button"
+                  onClick={() => setExpandedJobId((id) => (id === job.id ? null : job.id))}
+                  className="flex w-full flex-wrap items-center justify-between gap-2 text-left"
+                >
+                  <span className="text-sm text-white">{job.filename}</span>
+                  <span className="text-xs text-slate-400">
+                    {new Date(job.importedAt).toLocaleString('pt-BR')} · {job.successCount}/{job.totalRows} importadas
+                    {job.errorCount > 0 ? ` · ${job.errorCount} erro(s)` : ''}
+                  </span>
+                </button>
+
+                {expandedJobId === job.id && job.errors.length > 0 && (
+                  <div className="mt-3 overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="text-slate-500">
+                        <tr>
+                          <th className="py-1 pr-3">Linha</th>
+                          <th className="py-1 pr-3">Campo</th>
+                          <th className="py-1">Erro</th>
+                        </tr>
+                      </thead>
+                      <tbody className="text-slate-300">
+                        {job.errors.map((e, i) => (
+                          <tr key={i} className="border-t border-slate-800">
+                            <td className="py-1 pr-3">{e.row}</td>
+                            <td className="py-1 pr-3">{e.field ?? '—'}</td>
+                            <td className="py-1">{e.message}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </section>
+  )
+}
+
 interface EntryDTO {
   id: string
   divisionId: string
@@ -581,12 +1241,14 @@ function EntriesSection({
   canManage,
   canOperate,
   canWeighIn,
+  refreshKey,
 }: {
   eventId: string
   divisions: DivisionDTO[]
   canManage: boolean
   canOperate: boolean
   canWeighIn: boolean
+  refreshKey: number
 }) {
   const [entries, setEntries] = useState<EntryDTO[] | null>(null)
   const [athletes, setAthletes] = useState<Record<string, AthleteListItem>>({})
@@ -610,7 +1272,7 @@ function EntriesSection({
 
   useEffect(() => {
     void load()
-  }, [load])
+  }, [load, refreshKey])
 
   const divisionById: Record<string, DivisionDTO> = {}
   for (const d of divisions) divisionById[d.id] = d
@@ -625,6 +1287,14 @@ function EntriesSection({
     <section>
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-lg font-semibold text-white">Inscrições</h2>
+        {canOperate && (
+          <Link
+            href={`/events/${eventId}/checkin`}
+            className="mr-2 rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-300 hover:bg-slate-800"
+          >
+            Check-in
+          </Link>
+        )}
         {canOperate && divisions.length > 0 && (
           <button
             type="button"
@@ -853,6 +1523,7 @@ function EntryRow({
   const [withdrawReason, setWithdrawReason] = useState('')
   const [showWeighIn, setShowWeighIn] = useState(false)
   const [showConfirm, setShowConfirm] = useState(false)
+  const [readingScale, setReadingScale] = useState(false)
   const [showWithdraw, setShowWithdraw] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -874,8 +1545,14 @@ function EntryRow({
   const handleCheckIn = () =>
     run(() => apiFetch(`/events/${eventId}/entries/${entry.id}/checkin`, { method: 'PATCH' }))
 
-  const handleWeighIn = () =>
-    run(async () => {
+  // Weigh-in gets its own error handling (rather than the shared `run()`
+  // helper) so a network failure can be queued for later sync instead of
+  // just showing an error — see lib/offlineQueue.ts for why weigh-in
+  // specifically is one of the two flows that queue.
+  const handleWeighIn = async () => {
+    setLoading(true)
+    setError(null)
+    try {
       const result = await apiFetch<{ outcome: 'ok' | 'reallocated' | 'disqualified' }>(
         `/events/${eventId}/entries/${entry.id}/weighin`,
         { method: 'PATCH', body: JSON.stringify({ weightKg: Number(weighInValue) }) },
@@ -887,8 +1564,40 @@ function EntryRow({
       } else {
         setWeighInOutcome(null)
       }
-      return result
-    }).then(() => setShowWeighIn(false))
+      onChanged()
+      setShowWeighIn(false)
+    } catch (err) {
+      if (!(err instanceof ApiError)) {
+        await enqueueOfflineWrite({
+          path: `/events/${eventId}/entries/${entry.id}/weighin`,
+          method: 'PATCH',
+          body: { weightKg: Number(weighInValue) },
+          description: `Pesagem: ${athleteName} (${weighInValue}kg)`,
+        })
+        setWeighInOutcome('Sem conexão — pesagem salva neste aparelho, vai sincronizar automaticamente.')
+        setShowWeighIn(false)
+      } else {
+        setError(translateApiError(err.message))
+      }
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleReadScale = async () => {
+    setReadingScale(true)
+    try {
+      const result = await apiFetch<{ connected: boolean; reading: { weightKg: number } | null }>('/scale/reading')
+      if (result.reading) {
+        setWeighInValue(String(result.reading.weightKg))
+      }
+      // Disconnected/no reading: leave the field as-is — manual entry never blocked (CLAUDE.md).
+    } catch {
+      // hardware failure must never block manual entry — fail silently, operator keeps typing
+    } finally {
+      setReadingScale(false)
+    }
+  }
 
   const handleConfirm = () =>
     run(() =>
@@ -960,6 +1669,15 @@ function EntryRow({
               placeholder="kg"
               className="w-24 rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-sm text-white placeholder-slate-500"
             />
+            <button
+              type="button"
+              onClick={handleReadScale}
+              disabled={readingScale}
+              title="Ler peso da balança conectada"
+              className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800 disabled:opacity-60"
+            >
+              {readingScale ? 'Lendo…' : '⚖ Ler balança'}
+            </button>
             <button
               type="button"
               onClick={handleWeighIn}

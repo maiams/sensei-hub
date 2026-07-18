@@ -28,6 +28,7 @@ export default function EditAthletePage() {
         cpf: (athlete.cpf as string) ?? '',
         currentBelt: (athlete.currentBelt as string) ?? 'white',
         federationNumber: (athlete.federationNumber as string) ?? '',
+        zempoNumber: (athlete.zempoNumber as string) ?? '',
         hasMedicalRestriction: Boolean(athlete.hasMedicalRestriction),
         medicalNotes: (athlete.medicalNotes as string) ?? '',
         allergies: (athlete.allergies as string) ?? '',

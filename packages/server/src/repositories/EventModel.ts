@@ -10,6 +10,13 @@ export interface EventDocument {
   venue?: string
   status: EventStatus
   overweightPolicy: OverweightPolicy
+  // Minimum rest (minutes) an athlete must have between two matches, enforced
+  // by MatchDispatchService. Default is the CBJ national rule (RNC 2025,
+  // p.28) — see packages/shared/src/domain/event.ts for the citation.
+  restMinutesBetweenMatches: number
+  // Hide names of athletes younger than this on public screens ("FirstName
+  // L."); null = show full names. See shared CreateEventInput for details.
+  publicHideNamesUnderAge: number | null
   createdBy: Types.ObjectId
   createdAt: Date
   updatedAt: Date
@@ -34,6 +41,8 @@ const eventSchema = new Schema<EventDocument>(
       enum: ['disqualify', 'reallocate'],
       default: 'disqualify',
     },
+    restMinutesBetweenMatches: { type: Number, required: true, default: 10 },
+    publicHideNamesUnderAge: { type: Number, default: null },
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
   },
   { timestamps: true },

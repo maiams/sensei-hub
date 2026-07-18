@@ -47,6 +47,10 @@ export class ApiError extends Error {
     message: string,
     public readonly status: number,
     public readonly fieldErrors?: Record<string, string[]>,
+    // Raw `details` from the error body when it's not a Zod fieldErrors
+    // shape — e.g. CheckInServiceError attaches the prior AttendanceDTO to
+    // a 409 so the UI can show/act on it without a second round trip.
+    public readonly details?: unknown,
   ) {
     super(message)
     this.name = 'ApiError'
@@ -55,7 +59,7 @@ export class ApiError extends Error {
 
 async function parseErrorBody(res: Response): Promise<ApiError> {
   const body = await res.json().catch(() => ({ error: 'Erro desconhecido' }))
-  return new ApiError(body.error ?? 'Erro desconhecido', res.status, body.details?.fieldErrors)
+  return new ApiError(body.error ?? 'Erro desconhecido', res.status, body.details?.fieldErrors, body.details)
 }
 
 async function refreshAccessToken(): Promise<boolean> {

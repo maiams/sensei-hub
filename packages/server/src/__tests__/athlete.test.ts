@@ -4,6 +4,7 @@ import { buildApp } from '../app.js'
 import { AcademyModel } from '../repositories/AcademyModel.js'
 import { GuardianModel } from '../repositories/GuardianModel.js'
 import { AthleteService } from '../services/AthleteService.js'
+import { BELT_VALUES, CreateAthleteInput } from '@sensei-hub/shared'
 import type { FastifyInstance } from 'fastify'
 
 let app: FastifyInstance
@@ -97,6 +98,26 @@ function guardianPayload(overrides: Record<string, unknown> = {}) {
 // ─── Create athlete ──────────────────────────────────────────────────────────
 
 describe('POST /api/athletes', () => {
+  it('uses the supported graduation order and rejects obsolete black dan values', () => {
+    expect(BELT_VALUES).toEqual([
+      'white', 'burgundy', 'gray', 'blue', 'yellow', 'orange', 'green', 'purple', 'brown',
+      'black-1dan', 'black-2dan', 'black-3dan', 'black-4dan', 'black-5dan',
+      'coral-6dan', 'coral-7dan', 'coral-8dan', 'red-9dan', 'red-10dan',
+    ])
+
+    for (const currentBelt of BELT_VALUES) {
+      expect(CreateAthleteInput.safeParse({
+        academyId: 'academy-id',
+        ...adultAthletePayload({ currentBelt }),
+      }).success).toBe(true)
+    }
+
+    expect(CreateAthleteInput.safeParse({
+      academyId: 'academy-id',
+      ...adultAthletePayload({ currentBelt: 'black-6dan' }),
+    }).success).toBe(false)
+  })
+
   it('returns 401 without token', async () => {
     const res = await app.inject({ method: 'POST', url: '/api/athletes', payload: adultAthletePayload() })
     expect(res.statusCode).toBe(401)
@@ -120,12 +141,14 @@ describe('POST /api/athletes', () => {
       method: 'POST',
       url: '/api/athletes',
       headers: { authorization: `Bearer ${token}` },
-      payload: adultAthletePayload(),
+      payload: adultAthletePayload({ federationNumber: 'FPJ-123', zempoNumber: 'CBJ-456' }),
     })
     expect(res.statusCode).toBe(201)
     const body = res.json()
     expect(body.fullName).toBe('Ricardo Santos')
     expect(body.enrollmentNumber).toBe('000001')
+    expect(body.federationNumber).toBe('FPJ-123')
+    expect(body.zempoNumber).toBe('CBJ-456')
   })
 
   it('returns 400 when a minor is registered without a guardian', async () => {

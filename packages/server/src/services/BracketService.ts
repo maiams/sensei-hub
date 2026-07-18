@@ -3,6 +3,7 @@ import { MatchModel, type MatchDocument } from '../repositories/MatchModel.js'
 import { EventModel } from '../repositories/EventModel.js'
 import { DivisionModel } from '../repositories/DivisionModel.js'
 import { EventEntryModel } from '../repositories/EventEntryModel.js'
+import { AthleteModel } from '../repositories/AthleteModel.js'
 import { AuditLogModel } from '../repositories/AuditLogModel.js'
 import { EliminationEngine } from '../domain/bracket/EliminationEngine.js'
 import { RodizioEngine } from '../domain/bracket/RodizioEngine.js'
@@ -39,10 +40,18 @@ export class BracketService {
     // No seeding UI yet — every athlete enters unseeded; the draw order is
     // decided deterministically by `seed`, same as any other unseeded
     // athlete in the engine.
+    //
+    // clubId: prefers Athlete.clubName (set on scope:'event-only' athletes
+    // imported from a visiting academy, Fase 3D) so same-club separation
+    // actually distinguishes visiting clubs from each other. Falls back to
+    // the entry's academyId — always the single installed academy — which
+    // groups every home-academy athlete under one club, same as before 3D.
+    const athletes = await AthleteModel.find({ _id: { $in: eligible.map((e) => e.athleteId) } })
+    const clubNameByAthleteId = new Map(athletes.map((a) => [a._id.toString(), a.clubName]))
     const slots: AthleteSlot[] = eligible.map((e) => ({
       athleteId: e.athleteId.toString(),
       seed: null,
-      clubId: e.academyId.toString(),
+      clubId: clubNameByAthleteId.get(e.athleteId.toString()) || e.academyId.toString(),
     }))
 
     const seed = input.seed ?? Date.now()
@@ -276,6 +285,47 @@ export class BracketService {
     return this.#matchToDTO(updated as MatchDocument)
   }
 
+  // Final standings of the division's active bracket, straight from the pure
+  // engine (Fase 3B) — throws 409 while the bracket can't be ranked yet
+  // (matches still missing results).
+  async getRankings(eventId: string, academyId: string, divisionId: string) {
+    const { bracket, matches } = await this.#loadActiveBracketState(eventId, academyId, divisionId)
+
+    // Both engines return partial standings for an unfinished bracket without
+    // complaining — final standings only make sense once every fightable
+    // match (both participants known) has a result, so gate it here.
+    const undecided = matches.some((m) => m.athleteAId && m.athleteBId && !m.result)
+    if (undecided) {
+      throw new BracketServiceError('Bracket is not fully decided yet', 409)
+    }
+
+    const engine = this.#engineFor(bracket.format)
+    const state = this.#toEngineState(bracket, matches)
+    let rankings
+    try {
+      rankings = engine.getFinalRankings(state)
+    } catch (err) {
+      if (err instanceof BracketEngineError) throw new BracketServiceError(err.message, 409)
+      throw err
+    }
+    if (rankings.length === 0) {
+      throw new BracketServiceError('Bracket is not fully decided yet', 409)
+    }
+
+    const athleteIds = rankings.map((r) => r.athleteId)
+    const athletes = await AthleteModel.find({ _id: { $in: athleteIds } })
+    const byId = new Map(athletes.map((a) => [a._id.toString(), a]))
+    return rankings.map((r) => {
+      const athlete = byId.get(r.athleteId)
+      return {
+        place: r.place,
+        athleteId: r.athleteId,
+        fullName: athlete?.fullName ?? '—',
+        clubName: athlete?.clubName ?? null,
+      }
+    })
+  }
+
   async #loadActiveBracketState(eventId: string, academyId: string, divisionId: string) {
     await this.#findEvent(eventId, academyId)
     const bracket = await BracketModel.findOne({ eventId, divisionId, status: 'active' })
@@ -295,7 +345,12 @@ export class BracketService {
             athleteAId: m.athleteAId,
             athleteBId: m.athleteBId,
             byeAthleteId: m.byeAthleteId,
-            ...(m.result ? { result: m.result } : {}),
+            // decidedAt is stamped here, not in the pure engine, so the
+            // bracket engine (domain/bracket/*) stays I/O-free — it's the
+            // only source of "when did this athlete's last match end",
+            // used by MatchDispatchService for the rest-time rule between
+            // an athlete's fights.
+            ...(m.result ? { result: { ...m.result, decidedAt: new Date() } } : {}),
           },
         },
       )
@@ -390,8 +445,10 @@ export class BracketService {
             isWalkover: m.result.isWalkover,
             method: m.result.method,
             points: m.result.points,
+            decidedAt: m.result.decidedAt?.toISOString(),
           }
         : null,
+      areaId: m.areaId ? m.areaId.toString() : null,
     }
   }
 

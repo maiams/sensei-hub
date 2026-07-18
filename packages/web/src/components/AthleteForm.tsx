@@ -15,6 +15,7 @@ export interface AthleteFormValues {
   cpf: string
   currentBelt: string
   federationNumber: string
+  zempoNumber: string
   hasMedicalRestriction: boolean
   medicalNotes: string
   allergies: string
@@ -33,6 +34,7 @@ const EMPTY_VALUES: AthleteFormValues = {
   cpf: '',
   currentBelt: 'white',
   federationNumber: '',
+  zempoNumber: '',
   hasMedicalRestriction: false,
   medicalNotes: '',
   allergies: '',
@@ -109,6 +111,7 @@ export function AthleteForm({ mode, athleteId, initialValues, onSuccess }: Athle
       cpf: values.cpf || undefined,
       currentBelt: values.currentBelt,
       federationNumber: values.federationNumber || undefined,
+      zempoNumber: values.zempoNumber || undefined,
       hasMedicalRestriction: values.hasMedicalRestriction,
       medicalNotes: values.medicalNotes || undefined,
       allergies: values.allergies || undefined,
@@ -271,7 +274,7 @@ export function AthleteForm({ mode, athleteId, initialValues, onSuccess }: Athle
       <section className="space-y-5">
         <h2 className="text-lg font-semibold text-white">Judô</h2>
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid gap-4 sm:grid-cols-3">
           <div>
             <label className={labelClass()} htmlFor="currentBelt">
               Graduação atual
@@ -291,13 +294,24 @@ export function AthleteForm({ mode, athleteId, initialValues, onSuccess }: Athle
           </div>
           <div>
             <label className={labelClass()} htmlFor="federationNumber">
-              Registro federativo
+              Registro FPJ
             </label>
             <input
               id="federationNumber"
               className={inputClass()}
               value={values.federationNumber}
               onChange={(e) => set('federationNumber', e.target.value)}
+            />
+          </div>
+          <div>
+            <label className={labelClass()} htmlFor="zempoNumber">
+              Registro Zempo (CBJ)
+            </label>
+            <input
+              id="zempoNumber"
+              className={inputClass()}
+              value={values.zempoNumber}
+              onChange={(e) => set('zempoNumber', e.target.value)}
             />
           </div>
         </div>

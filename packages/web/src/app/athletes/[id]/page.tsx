@@ -26,6 +26,7 @@ interface AthleteDetail {
   cpf?: string
   currentBelt: string
   federationNumber?: string
+  zempoNumber?: string
   latestWeightKg?: number
   status: string
   hasMedicalRestriction: boolean
@@ -144,6 +145,8 @@ export default function AthleteProfilePage() {
           <Field label="Gênero" value={GENDER_LABELS[athlete.gender] ?? athlete.gender} />
           <Field label="Graduação" value={BELT_LABELS[athlete.currentBelt] ?? athlete.currentBelt} />
           <Field label="Peso atual" value={athlete.latestWeightKg ? `${athlete.latestWeightKg} kg` : '—'} />
+          <Field label="Registro FPJ" value={athlete.federationNumber ?? '—'} />
+          <Field label="Registro Zempo (CBJ)" value={athlete.zempoNumber ?? '—'} />
           <Field label="E-mail" value={athlete.email ?? '—'} />
           <Field label="Celular" value={athlete.phone ?? '—'} />
         </section>

@@ -511,3 +511,136 @@ describe('End-to-end: collapse everything into a single free-form division', () 
     expect(final[0]?.groups.map((g) => g.label)).toEqual(['Todos'])
   })
 })
+
+describe('Match rules (matchRules)', () => {
+  const CBJ_DEFAULT = {
+    matchDurationSeconds: 240,
+    goldenScoreEnabled: true,
+    goldenScoreDurationSeconds: null,
+    osaekomiYukoSeconds: 5,
+    osaekomiWazaariSeconds: 10,
+    osaekomiIpponSeconds: 20,
+  }
+
+  it('creating a template without matchRules applies the CBJ default', async () => {
+    const token = await setupAdmin()
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/division-templates',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { label: 'Livre' },
+    })
+    expect(res.statusCode).toBe(201)
+    expect(res.json().matchRules).toEqual(CBJ_DEFAULT)
+  })
+
+  it('PATCH updates matchRules (golden score disabled, shorter fight)', async () => {
+    const token = await setupAdmin()
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/division-templates',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { label: 'Festival Kids' },
+    })
+    const key = createRes.json().key
+
+    const newRules = {
+      matchDurationSeconds: 90,
+      goldenScoreEnabled: false,
+      goldenScoreDurationSeconds: null,
+      osaekomiYukoSeconds: 5,
+      osaekomiWazaariSeconds: 10,
+      osaekomiIpponSeconds: 15,
+    }
+    const patchRes = await app.inject({
+      method: 'PATCH',
+      url: `/api/division-templates/${key}`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { matchRules: newRules },
+    })
+    expect(patchRes.statusCode).toBe(200)
+    expect(patchRes.json().matchRules).toEqual(newRules)
+
+    const listRes = await app.inject({
+      method: 'GET',
+      url: '/api/division-templates',
+      headers: { authorization: `Bearer ${token}` },
+    })
+    const persisted = listRes.json<Array<{ key: string; matchRules: unknown }>>().find((t) => t.key === key)
+    expect(persisted?.matchRules).toEqual(newRules)
+  })
+
+  it('rejects osaekomi thresholds that are not strictly increasing', async () => {
+    const token = await setupAdmin()
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/division-templates',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { label: 'Livre' },
+    })
+    const key = createRes.json().key
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/api/division-templates/${key}`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: {
+        matchRules: {
+          matchDurationSeconds: 240,
+          goldenScoreEnabled: true,
+          goldenScoreDurationSeconds: null,
+          osaekomiYukoSeconds: 10,
+          osaekomiWazaariSeconds: 10,
+          osaekomiIpponSeconds: 20,
+        },
+      },
+    })
+    expect(res.statusCode).toBe(400)
+  })
+
+  it('load-preset applies CBJ RNC 2025 fight times per age class', async () => {
+    const token = await setupAdmin()
+    const templates = await loadPreset(token)
+    const byKey = new Map(templates.map((t) => [t.key, t as unknown as { matchRules: typeof CBJ_DEFAULT }]))
+
+    expect(byKey.get('infantil')?.matchRules.matchDurationSeconds).toBe(120) // Sub-13: 2min
+    expect(byKey.get('infanto-juvenil')?.matchRules.matchDurationSeconds).toBe(180) // Sub-15: 3min
+    expect(byKey.get('juvenil')?.matchRules.matchDurationSeconds).toBe(240) // Cadete: 4min
+    expect(byKey.get('adulto')?.matchRules.matchDurationSeconds).toBe(240)
+    // Sub-09/Sub-11 are not in the RNC — preset assumes 2min like Sub-13
+    expect(byKey.get('pre-mirim')?.matchRules.matchDurationSeconds).toBe(120)
+    expect(byKey.get('mirim')?.matchRules.matchDurationSeconds).toBe(120)
+
+    for (const t of templates as unknown as Array<{ matchRules: typeof CBJ_DEFAULT }>) {
+      expect(t.matchRules.goldenScoreEnabled).toBe(true)
+      expect(t.matchRules.goldenScoreDurationSeconds).toBeNull()
+      expect(t.matchRules.osaekomiYukoSeconds).toBe(5)
+      expect(t.matchRules.osaekomiWazaariSeconds).toBe(10)
+      expect(t.matchRules.osaekomiIpponSeconds).toBe(20)
+    }
+  })
+
+  it('templates created before the field existed fall back to the CBJ default in the DTO', async () => {
+    const token = await setupAdmin()
+    // Simulate a pre-existing document without matchRules by writing directly.
+    const { DivisionTemplateModel } = await import('../repositories/DivisionTemplateModel.js')
+    const { AcademyModel } = await import('../repositories/AcademyModel.js')
+    const academy = await AcademyModel.findOne()
+    await DivisionTemplateModel.create({
+      academyId: academy!._id,
+      key: 'legado',
+      label: 'Legado',
+      minAge: null,
+      maxAge: null,
+      order: 0,
+    })
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/division-templates',
+      headers: { authorization: `Bearer ${token}` },
+    })
+    const legacy = res.json<Array<{ key: string; matchRules: unknown }>>().find((t) => t.key === 'legado')
+    expect(legacy?.matchRules).toEqual(CBJ_DEFAULT)
+  })
+})

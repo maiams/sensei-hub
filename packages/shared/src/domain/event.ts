@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { MatchRules } from './divisionTemplate.js'
 
 export const EventStatus = z.enum(['draft', 'registration', 'in_progress', 'completed', 'cancelled'])
 export type EventStatus = z.infer<typeof EventStatus>
@@ -27,6 +28,14 @@ export type RegistrationMethod = z.infer<typeof RegistrationMethod>
 export const OverweightPolicy = z.enum(['disqualify', 'reallocate'])
 export type OverweightPolicy = z.infer<typeof OverweightPolicy>
 
+// Minimum rest time (minutes) an athlete must have between two matches,
+// enforced by the area/mat dispatcher (see MatchDispatchService on the
+// server). Default of 10 is the CBJ national rule (RNC 2025, p.28: "Para
+// todas as classes, o tempo mínimo de intervalo entre os combates de um
+// mesmo atleta será de 10 minutos") — kept editable per event since other
+// federations or local tournaments may set a different value. The default
+// itself lives in the Mongoose schema (EventModel), same as overweightPolicy.
+
 // POST /api/events
 export const CreateEventInput = z.object({
   hostAcademyId: z.string(),
@@ -35,6 +44,12 @@ export const CreateEventInput = z.object({
   eventDate: z.string().date(),
   venue: z.string().optional(),
   overweightPolicy: OverweightPolicy.optional(), // defaults to 'disqualify'
+  restMinutesBetweenMatches: z.number().int().min(0).max(120).optional(), // defaults to 10 (CBJ RNC 2025)
+  // Athletes younger than this at the event date are shown on PUBLIC screens
+  // (scoreboard display, next-matches board, printed public sheets) as
+  // "FirstName L." instead of their full name. null (default) shows full
+  // names for everyone. Operator/staff views always show full names.
+  publicHideNamesUnderAge: z.number().int().min(1).max(21).nullable().optional(),
 })
 export type CreateEventInput = z.infer<typeof CreateEventInput>
 
@@ -54,6 +69,8 @@ export const EventSchema = z.object({
   venue: z.string().optional(),
   status: EventStatus,
   overweightPolicy: OverweightPolicy,
+  restMinutesBetweenMatches: z.number().int().min(0).max(120),
+  publicHideNamesUnderAge: z.number().int().nullable(),
   createdBy: z.string(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
@@ -75,6 +92,7 @@ export const CreateDivisionInput = z.object({
   minAge: z.number().int().min(0).max(120).nullable().optional(),
   maxAge: z.number().int().min(0).max(120).nullable().optional(),
   weightLimitKg: z.number().positive().max(300).nullable().optional(), // null = open/heaviest
+  matchRules: MatchRules.optional(), // omitted = CBJ_DEFAULT_MATCH_RULES (or the source template's rules on import)
 })
 export type CreateDivisionInput = z.infer<typeof CreateDivisionInput>
 
@@ -94,6 +112,7 @@ export const DivisionSchema = z.object({
   minAge: z.number().int().nullable(),
   maxAge: z.number().int().nullable(),
   weightLimitKg: z.number().positive().nullable(),
+  matchRules: MatchRules,
   sourceTemplateKey: z.string().optional(),
   sourceGroupId: z.string().optional(),
   createdAt: z.string().datetime(),
@@ -147,6 +166,13 @@ export const EventEntrySchema = z.object({
 })
 export type EventEntry = z.infer<typeof EventEntrySchema>
 
+export const ImportRowError = z.object({
+  row: z.number().int(), // 1-based Excel row number, as seen in the spreadsheet (header = row 1)
+  field: z.string().optional(),
+  message: z.string(),
+})
+export type ImportRowError = z.infer<typeof ImportRowError>
+
 export const ImportJobSchema = z.object({
   _id: z.string(),
   eventId: z.string(),
@@ -156,10 +182,72 @@ export const ImportJobSchema = z.object({
   totalRows: z.number().int().nonnegative(),
   successCount: z.number().int().nonnegative(),
   errorCount: z.number().int().nonnegative(),
-  errors: z.array(z.object({
-    row: z.number().int(),
-    field: z.string().optional(),
-    message: z.string(),
-  })),
+  errors: z.array(ImportRowError),
 })
 export type ImportJob = z.infer<typeof ImportJobSchema>
+
+// An Area is a physical mat/table at a live event. A bracket is NOT confined
+// to one area — its matches get dispatched across whichever areas are open,
+// one at a time, by MatchDispatchService (server). `allowedDivisionIds: null`
+// means the area accepts any division; a non-null list restricts it (e.g. a
+// smaller mat reserved for Sub-11, or a PCD-only area) — set manually by the
+// organizer, never inferred from division name/age (divisions are free-text
+// by design, see DivisionTemplate/DivisionGroup).
+export const AreaStatus = z.enum(['open', 'closed'])
+export type AreaStatus = z.infer<typeof AreaStatus>
+
+// POST /api/events/:id/areas
+export const CreateAreaInput = z.object({
+  name: z.string().min(1).max(60),
+  allowedDivisionIds: z.array(z.string()).nullable().optional(), // omitted/undefined = null = any division
+})
+export type CreateAreaInput = z.infer<typeof CreateAreaInput>
+
+// PATCH /api/events/:id/areas/:aid
+export const UpdateAreaInput = z.object({
+  name: z.string().min(1).max(60).optional(),
+  allowedDivisionIds: z.array(z.string()).nullable().optional(),
+})
+export type UpdateAreaInput = z.infer<typeof UpdateAreaInput>
+
+// PATCH /api/events/:id/areas/:aid/close
+// POST /api/events/:id/areas/:aid/force-match — manual dispatch override
+// ("this match on this mat, now"). Ignores the area's allowedDivisionIds by
+// design; still enforces athlete rest unless ignoreRest is explicitly true.
+export const ForceMatchInput = z.object({
+  matchId: z.string(),
+  ignoreRest: z.boolean().optional(),
+})
+export type ForceMatchInput = z.infer<typeof ForceMatchInput>
+
+export const CloseAreaInput = z.object({
+  reason: z.string().min(3).max(500),
+})
+export type CloseAreaInput = z.infer<typeof CloseAreaInput>
+
+export const AreaSchema = z.object({
+  _id: z.string(),
+  eventId: z.string(),
+  name: z.string(),
+  allowedDivisionIds: z.array(z.string()).nullable(),
+  status: AreaStatus,
+  closedReason: z.string().optional(),
+  closedAt: z.string().datetime().optional(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+})
+export type Area = z.infer<typeof AreaSchema>
+
+// POST /api/events/:id/areas/:aid/next-match
+export const NextMatchSchema = z.object({
+  match: z
+    .object({
+      id: z.string(),
+      matchNumber: z.number().int(),
+      divisionId: z.string(),
+      athleteAId: z.string(),
+      athleteBId: z.string(),
+    })
+    .nullable(), // null = area has nothing eligible to dispatch right now (not an error)
+})
+export type NextMatch = z.infer<typeof NextMatchSchema>

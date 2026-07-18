@@ -20,6 +20,8 @@ export class EventService {
       eventDate: input.eventDate,
       venue: input.venue,
       overweightPolicy: input.overweightPolicy,
+      restMinutesBetweenMatches: input.restMinutesBetweenMatches,
+      publicHideNamesUnderAge: input.publicHideNamesUnderAge ?? null,
       createdBy: ctx.userId,
     })
 
@@ -55,7 +57,10 @@ export class EventService {
     }
 
     const auditEntries: Array<{ fieldName: string; oldValue: unknown; newValue: unknown }> = []
-    const fields = ['name', 'description', 'eventDate', 'venue', 'status', 'overweightPolicy'] as const
+    const fields = [
+      'name', 'description', 'eventDate', 'venue', 'status', 'overweightPolicy', 'restMinutesBetweenMatches',
+      'publicHideNamesUnderAge',
+    ] as const
     for (const field of fields) {
       const newValue = input[field]
       if (newValue === undefined) continue
@@ -97,6 +102,8 @@ export class EventService {
       venue: event.venue,
       status: event.status,
       overweightPolicy: event.overweightPolicy,
+      restMinutesBetweenMatches: event.restMinutesBetweenMatches,
+      publicHideNamesUnderAge: event.publicHideNamesUnderAge ?? null,
       createdBy: event.createdBy.toString(),
       createdAt: event.createdAt.toISOString(),
       updatedAt: event.updatedAt.toISOString(),

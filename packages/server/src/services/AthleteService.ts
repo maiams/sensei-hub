@@ -25,7 +25,7 @@ export interface AthleteCtx {
 export type CreateAthleteParams = Omit<CreateAthleteInput, 'academyId'>
 export type UpdateAthleteParams = UpdateAthleteInput
 
-function isMinor(birthDate: string, referenceDate = new Date().toISOString().slice(0, 10)): boolean {
+export function isMinor(birthDate: string, referenceDate = new Date().toISOString().slice(0, 10)): boolean {
   const [by, bm, bd] = birthDate.split('-').map(Number) as [number, number, number]
   const [ry, rm, rd] = referenceDate.split('-').map(Number) as [number, number, number]
   let age = ry - by
@@ -83,6 +83,8 @@ export class AthleteService {
               cpf: athleteFields.cpf,
               currentBelt: athleteFields.currentBelt,
               federationNumber: athleteFields.federationNumber,
+              zempoNumber: athleteFields.zempoNumber,
+              clubName: athleteFields.clubName,
               hasMedicalRestriction: athleteFields.hasMedicalRestriction ?? false,
               medical: { notes: athleteFields.medicalNotes, allergies: athleteFields.allergies },
               termsAccepted: athleteFields.termsAccepted ?? false,
@@ -207,7 +209,7 @@ export class AthleteService {
 
     const simpleFields = [
       'fullName', 'preferredName', 'gender', 'birthDate', 'nationality', 'email',
-      'phone', 'cpf', 'currentBelt', 'federationNumber', 'hasMedicalRestriction',
+      'phone', 'cpf', 'currentBelt', 'federationNumber', 'zempoNumber', 'clubName', 'hasMedicalRestriction',
       'termsAccepted', 'imageAuthorizationAccepted',
     ] as const
 
@@ -391,6 +393,8 @@ export class AthleteService {
       cpf: athlete.cpf,
       currentBelt: athlete.currentBelt,
       federationNumber: athlete.federationNumber,
+      zempoNumber: athlete.zempoNumber,
+      clubName: athlete.clubName,
       latestWeightKg: athlete.latestWeightKg,
       hasMedicalRestriction: athlete.hasMedicalRestriction,
       medicalNotes: includeMedical ? athlete.medical?.notes : undefined,

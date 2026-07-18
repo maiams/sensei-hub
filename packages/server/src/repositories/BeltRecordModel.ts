@@ -1,5 +1,5 @@
 import { Schema, model, type Types } from 'mongoose'
-import type { Belt } from '@sensei-hub/shared'
+import { BELT_VALUES, type Belt } from '@sensei-hub/shared'
 
 export interface BeltRecordDocument {
   _id: Types.ObjectId
@@ -18,11 +18,7 @@ const beltRecordSchema = new Schema<BeltRecordDocument>(
     belt: {
       type: String,
       required: true,
-      enum: [
-        'white', 'yellow', 'orange', 'green', 'blue', 'brown',
-        'black-1dan', 'black-2dan', 'black-3dan', 'black-4dan', 'black-5dan',
-        'black-6dan', 'black-7dan', 'black-8dan', 'black-9dan', 'black-10dan',
-      ],
+      enum: BELT_VALUES,
     },
     grantedAt: { type: String, required: true },
     grantedBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },

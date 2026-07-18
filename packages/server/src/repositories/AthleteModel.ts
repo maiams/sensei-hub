@@ -1,5 +1,5 @@
 import { Schema, model, type Types } from 'mongoose'
-import type { AthleteScope, AthleteStatus, Gender, Belt } from '@sensei-hub/shared'
+import { BELT_VALUES, type AthleteScope, type AthleteStatus, type Gender, type Belt } from '@sensei-hub/shared'
 
 export interface AthleteDocument {
   _id: Types.ObjectId
@@ -18,6 +18,8 @@ export interface AthleteDocument {
   cpf?: string
   currentBelt: Belt
   federationNumber?: string
+  zempoNumber?: string
+  clubName?: string
   latestWeightKg?: number
   hasMedicalRestriction: boolean
   medical?: {
@@ -49,13 +51,11 @@ const athleteSchema = new Schema<AthleteDocument>(
     currentBelt: {
       type: String,
       required: true,
-      enum: [
-        'white', 'yellow', 'orange', 'green', 'blue', 'brown',
-        'black-1dan', 'black-2dan', 'black-3dan', 'black-4dan', 'black-5dan',
-        'black-6dan', 'black-7dan', 'black-8dan', 'black-9dan', 'black-10dan',
-      ],
+      enum: BELT_VALUES,
     },
     federationNumber: { type: String, trim: true },
+    zempoNumber: { type: String, trim: true },
+    clubName: { type: String, trim: true, maxlength: 120 },
     latestWeightKg: { type: Number },
     hasMedicalRestriction: { type: Boolean, required: true, default: false },
     medical: {

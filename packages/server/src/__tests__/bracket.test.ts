@@ -40,7 +40,7 @@ interface MatchDTO {
   nextMatchNumber: number | null
   nextMatchSlot: 'A' | 'B' | null
   groupMatchNumber: number | null
-  result: { winnerId: string; isWalkover: boolean } | null
+  result: { winnerId: string; isWalkover: boolean; decidedAt?: string } | null
 }
 interface BracketDTO {
   id: string
@@ -283,6 +283,28 @@ describe('POST .../matches/:mid/result', () => {
     const next = after.find((m) => m.matchNumber === m1.nextMatchNumber) as MatchDTO
     const slotValue = m1.nextMatchSlot === 'A' ? next.athleteAId : next.athleteBId
     expect(slotValue).toBe(winnerId)
+  })
+
+  it('stamps result.decidedAt on record, and re-stamps it on correction — used by MatchDispatchService for the rest-time rule', async () => {
+    const token = await setupAdmin()
+    const event = await createEvent(token)
+    const division = await createDivision(token, event.id)
+    for (let i = 0; i < 8; i++) await confirmedEntry(token, event.id, division.id)
+    await generate(token, event.id, division.id, { format: 'elimination', seed: 11 })
+
+    const matches = await listMatches(token, event.id, division.id)
+    const m1 = matches.find((m) => m.matchNumber === 1) as MatchDTO
+    const [a, b] = [m1.athleteAId as string, m1.athleteBId as string]
+
+    const res = await recordResult(token, event.id, division.id, 1, { winnerId: a, isWalkover: false })
+    const firstDecidedAt = res.json<MatchDTO>().result?.decidedAt
+    expect(firstDecidedAt).toBeDefined()
+    expect(new Date(firstDecidedAt as string).getTime()).not.toBeNaN()
+
+    const corrected = await correctResult(token, event.id, division.id, 1, { winnerId: b, isWalkover: false, reason: 'placar trocado' })
+    const secondDecidedAt = corrected.json<MatchDTO>().result?.decidedAt
+    expect(secondDecidedAt).toBeDefined()
+    expect(new Date(secondDecidedAt as string).getTime()).toBeGreaterThanOrEqual(new Date(firstDecidedAt as string).getTime())
   })
 
   it('returns 409 recording a result twice (must use /correct)', async () => {

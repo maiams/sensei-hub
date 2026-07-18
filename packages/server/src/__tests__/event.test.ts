@@ -259,6 +259,38 @@ describe('Divisions', () => {
     expect(list.json<DivisionDTO[]>()).toHaveLength(14)
   })
 
+  it('a manually created division gets the CBJ default matchRules; import-from-templates inherits the template rules', async () => {
+    const token = await setupAdmin()
+    const event = await createEvent(token)
+
+    const manual = await createDivision(token, event.id, { name: 'Aberta' })
+    expect((manual as unknown as { matchRules: { matchDurationSeconds: number; goldenScoreEnabled: boolean } }).matchRules).toEqual({
+      matchDurationSeconds: 240,
+      goldenScoreEnabled: true,
+      goldenScoreDurationSeconds: null,
+      osaekomiYukoSeconds: 5,
+      osaekomiWazaariSeconds: 10,
+      osaekomiIpponSeconds: 20,
+    })
+
+    await app.inject({
+      method: 'POST',
+      url: '/api/division-templates/load-preset',
+      headers: { authorization: `Bearer ${token}` },
+    })
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/events/${event.id}/divisions/import-from-templates`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { templateKeys: ['infantil'] },
+    })
+    expect(res.statusCode).toBe(201)
+    const imported = res.json<Array<{ matchRules: { matchDurationSeconds: number } }>>()
+    expect(imported.length).toBeGreaterThan(0)
+    // Infantil (Sub-13) fights last 2 minutes per CBJ RNC 2025
+    expect(imported.every((d) => d.matchRules.matchDurationSeconds === 120)).toBe(true)
+  })
+
   it('returns 403 for staff on write routes', async () => {
     const adminToken = await setupAdmin()
     const event = await createEvent(adminToken)

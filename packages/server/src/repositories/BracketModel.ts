@@ -4,7 +4,11 @@ import type { BracketFormat, BracketSize, RepechageType } from '@sensei-hub/shar
 export interface BracketAthleteSlotSub {
   athleteId: Types.ObjectId
   seed: number | null
-  clubId: Types.ObjectId | null
+  // Opaque same-club-separation key, NOT a foreign key: BracketService fills
+  // it with the athlete's free-form clubName when present (visiting athletes,
+  // Fase 3D) or the academyId string otherwise. Only ever compared for
+  // equality by the draw engine.
+  clubId: string | null
 }
 
 export interface BracketDocument {
@@ -32,7 +36,7 @@ const bracketSlotSchema = new Schema<BracketAthleteSlotSub>(
   {
     athleteId: { type: Schema.Types.ObjectId, ref: 'Athlete', required: true },
     seed: { type: Number, default: null },
-    clubId: { type: Schema.Types.ObjectId, ref: 'Academy', default: null },
+    clubId: { type: String, default: null },
   },
   { _id: false },
 )

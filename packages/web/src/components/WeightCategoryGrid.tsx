@@ -1,102 +1,40 @@
 'use client'
 
-import { useState } from 'react'
-import { apiFetch, ApiError } from '../lib/api'
-import { translateApiError } from '../lib/labels'
+// Controlled weight-category grid for one division group. All edits flow up
+// to the page's draft state (single "Salvar alterações" bar in
+// /settings/divisions) — this component has no save of its own. Structural
+// actions (delete group, restore from preset) stay immediate and are handled
+// by the parent via callbacks.
 
-interface Row {
+export interface GroupDraft {
+  id: string
   label: string
-  maxKg: string // kept as string while editing; '' means open/last category
+  categories: Array<{ label: string; maxKg: string }> // maxKg as string while editing; '' = open/last category
+  canRestoreFromPreset: boolean
 }
 
 interface WeightCategoryGridProps {
-  templateKey: string
-  groupId: string
-  initialLabel: string
-  initialCategories: Array<{ label: string; maxKg: number | null }>
-  canRestoreFromPreset: boolean
+  group: GroupDraft
   canEdit: boolean
-  onDeleted: () => void
+  onChange: (updated: GroupDraft) => void
+  onDelete: () => void
+  onRestore: () => void
 }
 
-function toRows(categories: Array<{ label: string; maxKg: number | null }>): Row[] {
-  return categories.map((c) => ({ label: c.label, maxKg: c.maxKg === null ? '' : String(c.maxKg) }))
-}
-
-export function WeightCategoryGrid({
-  templateKey,
-  groupId,
-  initialLabel,
-  initialCategories,
-  canRestoreFromPreset,
-  canEdit,
-  onDeleted,
-}: WeightCategoryGridProps) {
-  const [label, setLabel] = useState(initialLabel)
-  const [rows, setRows] = useState<Row[]>(toRows(initialCategories))
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  function updateRow(index: number, field: keyof Row, value: string) {
-    setRows((prev) => prev.map((r, i) => (i === index ? { ...r, [field]: value } : r)))
+export function WeightCategoryGrid({ group, canEdit, onChange, onDelete, onRestore }: WeightCategoryGridProps) {
+  function updateRow(index: number, field: 'label' | 'maxKg', value: string) {
+    onChange({
+      ...group,
+      categories: group.categories.map((c, i) => (i === index ? { ...c, [field]: value } : c)),
+    })
   }
 
   function addRow() {
-    setRows((prev) => [...prev, { label: '', maxKg: '' }])
+    onChange({ ...group, categories: [...group.categories, { label: '', maxKg: '' }] })
   }
 
   function removeRow(index: number) {
-    setRows((prev) => prev.filter((_, i) => i !== index))
-  }
-
-  async function handleSave() {
-    setLoading(true)
-    setError(null)
-    try {
-      const categories = rows.map((r) => ({
-        label: r.label.trim(),
-        maxKg: r.maxKg.trim() === '' ? null : Number(r.maxKg),
-      }))
-      const result = await apiFetch<{ label: string; categories: Array<{ label: string; maxKg: number | null }> }>(
-        `/division-templates/${templateKey}/groups/${groupId}`,
-        { method: 'PATCH', body: JSON.stringify({ label, categories }) },
-      )
-      setLabel(result.label)
-      setRows(toRows(result.categories))
-    } catch (err) {
-      setError(err instanceof ApiError ? translateApiError(err.message) : 'Não foi possível salvar.')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  async function handleRestore() {
-    setLoading(true)
-    setError(null)
-    try {
-      const result = await apiFetch<{ categories: Array<{ label: string; maxKg: number | null }> }>(
-        `/division-templates/${templateKey}/groups/${groupId}/restore`,
-        { method: 'POST' },
-      )
-      setRows(toRows(result.categories))
-    } catch (err) {
-      setError(err instanceof ApiError ? translateApiError(err.message) : 'Não foi possível restaurar.')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  async function handleDelete() {
-    if (!window.confirm(`Apagar o grupo "${label}"?`)) return
-    setLoading(true)
-    setError(null)
-    try {
-      await apiFetch(`/division-templates/${templateKey}/groups/${groupId}`, { method: 'DELETE' })
-      onDeleted()
-    } catch (err) {
-      setError(err instanceof ApiError ? translateApiError(err.message) : 'Não foi possível apagar o grupo.')
-      setLoading(false)
-    }
+    onChange({ ...group, categories: group.categories.filter((_, i) => i !== index) })
   }
 
   return (
@@ -104,13 +42,13 @@ export function WeightCategoryGrid({
       <div className="mb-3 flex items-center gap-2">
         <input
           type="text"
-          value={label}
+          value={group.label}
           disabled={!canEdit}
-          onChange={(e) => setLabel(e.target.value)}
+          onChange={(e) => onChange({ ...group, label: e.target.value })}
           placeholder="Nome do grupo"
           className="flex-1 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm font-medium text-white placeholder-slate-500 disabled:opacity-60"
         />
-        {canRestoreFromPreset && (
+        {group.canRestoreFromPreset && (
           <span className="shrink-0 rounded-full bg-blue-950 px-2 py-0.5 text-xs font-medium text-blue-300">
             do padrão FPJ
           </span>
@@ -118,7 +56,7 @@ export function WeightCategoryGrid({
       </div>
 
       <div className="space-y-2">
-        {rows.map((row, i) => (
+        {group.categories.map((row, i) => (
           <div key={i} className="flex items-center gap-2">
             <input
               type="text"
@@ -162,36 +100,24 @@ export function WeightCategoryGrid({
           >
             + Categoria
           </button>
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={loading}
-            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:opacity-60"
-          >
-            Salvar
-          </button>
-          {canRestoreFromPreset && (
+          {group.canRestoreFromPreset && (
             <button
               type="button"
-              onClick={handleRestore}
-              disabled={loading}
-              className="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-300 transition hover:bg-slate-800 disabled:opacity-60"
+              onClick={onRestore}
+              className="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-300 transition hover:bg-slate-800"
             >
               Restaurar valores da FPJ
             </button>
           )}
           <button
             type="button"
-            onClick={handleDelete}
-            disabled={loading}
-            className="ml-auto rounded-lg border border-red-900 px-4 py-2 text-sm text-red-400 transition hover:bg-red-950 disabled:opacity-60"
+            onClick={onDelete}
+            className="ml-auto rounded-lg border border-red-900 px-4 py-2 text-sm text-red-400 transition hover:bg-red-950"
           >
             Apagar grupo
           </button>
         </div>
       )}
-
-      {error && <p className="mt-2 text-sm text-red-400">{error}</p>}
     </div>
   )
 }

@@ -5,6 +5,7 @@ import { DivisionGroupModel } from '../repositories/DivisionGroupModel.js'
 import { EventEntryModel } from '../repositories/EventEntryModel.js'
 import { AuditLogModel } from '../repositories/AuditLogModel.js'
 import type { EventCtx } from './EventService.js'
+import { CBJ_DEFAULT_MATCH_RULES } from '@sensei-hub/shared'
 import type { CreateDivisionInput, UpdateDivisionInput, ImportDivisionsFromTemplatesInput } from '@sensei-hub/shared'
 
 export class DivisionService {
@@ -23,6 +24,7 @@ export class DivisionService {
       minAge: input.minAge ?? null,
       maxAge: input.maxAge ?? null,
       weightLimitKg: input.weightLimitKg ?? null,
+      matchRules: input.matchRules ?? CBJ_DEFAULT_MATCH_RULES,
     })
 
     await AuditLogModel.create({
@@ -60,6 +62,14 @@ export class DivisionService {
         auditEntries.push({ fieldName: field, oldValue, newValue })
         // @ts-expect-error — dynamic assignment across a known field union
         division[field] = newValue
+      }
+    }
+
+    if (input.matchRules !== undefined) {
+      const oldRules = division.matchRules ?? CBJ_DEFAULT_MATCH_RULES
+      if (JSON.stringify(oldRules) !== JSON.stringify(input.matchRules)) {
+        auditEntries.push({ fieldName: 'matchRules', oldValue: oldRules, newValue: input.matchRules })
+        division.matchRules = input.matchRules
       }
     }
 
@@ -160,6 +170,7 @@ export class DivisionService {
             minAge: template.minAge,
             maxAge: template.maxAge,
             weightLimitKg: category.maxKg,
+            matchRules: template.matchRules ?? CBJ_DEFAULT_MATCH_RULES,
             sourceTemplateKey: template.key,
             sourceGroupId: group._id,
           })
@@ -199,6 +210,7 @@ export class DivisionService {
       minAge: division.minAge,
       maxAge: division.maxAge,
       weightLimitKg: division.weightLimitKg,
+      matchRules: division.matchRules ?? CBJ_DEFAULT_MATCH_RULES,
       sourceTemplateKey: division.sourceTemplateKey,
       sourceGroupId: division.sourceGroupId?.toString(),
       createdAt: division.createdAt.toISOString(),
