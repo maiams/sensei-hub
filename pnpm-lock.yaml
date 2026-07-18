@@ -15,6 +15,70 @@ importers:
         specifier: ^5.8.3
         version: 5.9.3
 
+  apps/arena/server:
+    dependencies:
+      '@arena/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@dojo/shared':
+        specifier: workspace:*
+        version: link:../../dojo/shared
+      '@fastify/cors':
+        specifier: ^10.0.2
+        version: 10.1.0
+      '@fastify/jwt':
+        specifier: ^10.1.0
+        version: 10.1.0
+      '@fastify/multipart':
+        specifier: ^10.1.0
+        version: 10.1.0
+      '@fastify/websocket':
+        specifier: ^11.0.2
+        version: 11.2.0
+      '@sensei-hub/core-server':
+        specifier: workspace:*
+        version: link:../../../packages/core-server
+      '@sensei-hub/shared':
+        specifier: workspace:*
+        version: link:../../../packages/shared
+      fastify:
+        specifier: ^5.4.0
+        version: 5.9.0
+      mongodb:
+        specifier: ^6.20.0
+        version: 6.20.0(socks@2.8.9)
+      mongoose:
+        specifier: ^8.16.1
+        version: 8.24.1(socks@2.8.9)
+      multicast-dns:
+        specifier: ^7.2.5
+        version: 7.2.5
+      xlsx:
+        specifier: ^0.18.5
+        version: 0.18.5
+      zod:
+        specifier: ^3.25.67
+        version: 3.25.76
+    devDependencies:
+      '@types/multicast-dns':
+        specifier: ^7.2.4
+        version: 7.2.4
+      '@types/node':
+        specifier: ^24.0.10
+        version: 24.13.2
+      mongodb-memory-server:
+        specifier: ^11.2.0
+        version: 11.2.0(socks@2.8.9)
+      tsx:
+        specifier: ^4.20.3
+        version: 4.22.4
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.6(@types/debug@4.1.13)(@types/node@24.13.2)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.22.4)
+
   apps/arena/shared:
     dependencies:
       '@sensei-hub/shared':

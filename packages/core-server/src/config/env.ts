@@ -22,7 +22,7 @@ type BaseEnvShape = typeof baseShape & {
   MONGODB_URI: z.ZodDefault<z.ZodString>
 }
 
-export function createEnv<TExtra extends z.ZodRawShape = Record<string, never>>(
+export function createEnv<TExtra extends z.ZodRawShape = Record<never, never>>(
   defaults: EnvDefaults,
   extraShape?: TExtra,
 ): z.infer<z.ZodObject<BaseEnvShape & TExtra>> {
