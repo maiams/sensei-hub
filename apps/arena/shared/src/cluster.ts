@@ -2,7 +2,7 @@ import { z } from 'zod'
 
 // Fase 7 — Cluster Dinâmico. Multi-node MongoDB replica set formed
 // automatically via mDNS discovery on the gym LAN — see
-// packages/server/src/cluster/ for the implementation and
+// apps/arena/server/src/cluster/ for the implementation and
 // docs/status-e-plano.md for the architecture decisions/trade-offs.
 
 export const ClusterNodeRole = z.enum(['primary', 'secondary', 'arbiter', 'unknown'])
@@ -31,7 +31,7 @@ export const ClusterStatusDTO = z.object({
   // Exactly 2 data-bearing voting members and no arbiter yet — see
   // domain/cluster/rules.ts computeNeedsArbiter(). The server can only
   // detect this; spawning the extra arbiter mongod process is the
-  // Electron Supervisor's job (packages/app), which polls this field.
+  // Electron Supervisor's job (packages/desktop-runtime), which polls this field.
   needsArbiter: z.boolean(),
 })
 export type ClusterStatusDTO = z.infer<typeof ClusterStatusDTO>

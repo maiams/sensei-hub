@@ -27,10 +27,10 @@ const DEFAULT_ROLE_WATCH_INTERVAL_MS = 5_000
 // discover (mdns.ts), the bootstrap decision (rules.ts, pure), and the
 // direct-connection MongoDB admin commands needed to act on that decision
 // (rs.initiate / rs.add / rs.remove / rs.stepDown — the same direct-
-// connection pattern packages/app/src/supervisor.ts already uses for its
+// connection pattern packages/desktop-runtime/src/supervisor.ts already uses for its
 // own single-node rs.initiate()).
 //
-// Division of responsibility with Supervisor (packages/app): Supervisor
+// Division of responsibility with Supervisor (packages/desktop-runtime): Supervisor
 // spawns/supervises the mongod and server OS processes and, in cluster
 // mode, deliberately does NOT call rs.initiate() itself — it hands that
 // decision to ClusterManager (running inside the server process, which has
@@ -58,7 +58,7 @@ export class ClusterManager {
 
   // Decides whether this node founds the replica set or joins an existing
   // one, and makes it so. Must complete before the server connects via the
-  // replicaSet-aware mongoose URI (packages/server/src/index.ts) — a mongod
+  // replicaSet-aware mongoose URI (apps/arena/server/src/index.ts) — a mongod
   // started with --replSet but never initiated/added to a config isn't a
   // usable replica set member yet.
   async bootstrap(): Promise<void> {

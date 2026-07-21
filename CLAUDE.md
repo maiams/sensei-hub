@@ -401,7 +401,14 @@ Avoid:
 
 ## Naming
 
-Sensei Hub
+Sensei Hub is the umbrella for two independent products that share the same stack but build and run separately, with separate databases:
+
+* **Sensei Dojô** — academy management (athletes, anamnese, guardians, belts, weight tracking, staff). Code under `apps/dojo/`.
+* **Sensei Arena** — championship management (events, divisions, entries, check-in, weigh-in, brackets, matches, areas, scoreboard, public display, printing, Excel import, PWA/offline, mDNS cluster). Code under `apps/arena/`.
+
+The two integrate only by file (the Dojô exports an `.xlsx` the Arena imports), never at runtime. Shared technical code lives in `packages/` (`@sensei-hub/shared`, `core-server`, `core-web`, `desktop-runtime`). See `docs/status-e-plano.md` §3 for the full structure and the domain bridges (AuthCtx, the slim Arena competitor vs. the full Dojô athlete, the split weight records, the export/import contract).
+
+When adding a feature, first decide which product it belongs to; keep academy-management concerns out of the Arena and championship concerns out of the Dojô.
 
 ## Acceptance Criteria for New Features
 

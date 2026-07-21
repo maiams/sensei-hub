@@ -15,7 +15,7 @@ const DISABLED_STATUS: ClusterStatusDTO = {
 }
 
 // `clusterManager` is undefined when CLUSTER_ENABLED=false (the default —
-// see packages/server/src/index.ts, which only constructs and bootstraps a
+// see apps/arena/server/src/index.ts, which only constructs and bootstraps a
 // ClusterManager when the env flag is on). Both routes degrade gracefully
 // rather than 500ing when cluster mode is off.
 export async function clusterRoutes(

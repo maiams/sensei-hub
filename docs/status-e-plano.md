@@ -1,21 +1,25 @@
 # Sensei Hub — Status de Implementação e Plano de Desenvolvimento
 
 **Gerado em:** 2026-07-01
-**Atualizado em:** 2026-07-17 (Fase 7 — ClusterManager mDNS + RS dinâmico, concluída com ressalva de verificação documentada abaixo)
-**Propósito:** Documento de referência técnica. Descreve o que foi implementado, as decisões tomadas, e o plano detalhado para as fases seguintes. É a fonte de verdade para quem for implementar as próximas fases — leia a seção 6 (Convenções) antes de escrever código.
+**Atualizado em:** 2026-07-21 (separação em dois produtos independentes — Sensei Dojô e Sensei Arena)
+**Propósito:** Documento de referência técnica. Descreve a arquitetura atual, as decisões tomadas, e o histórico de implementação. É a fonte de verdade — leia a seção 6 (Convenções) antes de escrever código.
+
+> **Nota histórica:** as seções 4+ (fases 0–7) descrevem a construção do sistema como um **monolito único** (`packages/{shared,server,web,app}`). Em 2026-07-21 esse monolito foi separado em **dois produtos independentes**; caminhos de arquivo do tipo `packages/server`, `packages/web`, `packages/app` nas seções antigas correspondem hoje aos pacotes descritos na seção 3. O comportamento de domínio (auth, atletas, eventos, bracket, placar, cluster) foi preservado; o que mudou foi a organização e o modelo de atleta (ver seção 3.1). A tag git `pre-split` marca o último commit antes da separação.
 
 ---
 
 ## 1. Visão Geral do Produto
 
-Sensei Hub é uma plataforma **local-first** para gestão de academias de judô e condução de competições. Opera em hardware limitado (Celeron/i3, 4GB RAM), em redes WiFi de ginásio com conectividade instável, sem dependência de internet.
+Sensei Hub é o guarda-chuva de **dois produtos local-first** para academias de judô, que rodam de forma totalmente independente (build e execução separados, bancos separados), mas compartilham a mesma stack e código técnico comum:
 
-**Modelo de operação:** cada laptop rodando o Sensei Hub é simultaneamente servidor (API + banco de dados) e cliente (browser embutido). Um nó é eleito primary pelo protocolo Raft do MongoDB; os demais são secondary com failover automático.
+- **Sensei Dojô** — gestão de academia: atletas (cadastro + anamnese), responsáveis (guardians), faixas, acompanhamento de peso, staff/usuários.
+- **Sensei Arena** — gestão de campeonato: eventos, divisões/categorias (+ templates/grupos/preset FPJ), inscrições, check-in de evento, pesagem (+ balança), brackets, matches, áreas/tatames, mesa/placar, display público, impressão, import Excel, PWA/offline e cluster mDNS.
 
-**Documento de arquitetura completo:** `docs/arquitetura.md`
-**Auditoria arquitetural externa:** `docs/auditoria-arquitetura-2026-07-01.md`
+A integração entre os dois é por **arquivo**, sem acoplamento em runtime: o Dojô exporta um `.xlsx` (`GET /api/athletes/export`) exatamente no formato que o import da Arena lê. Cada produto opera em hardware limitado (Celeron/i3, 4GB RAM), em WiFi de ginásio instável, sem internet. Cada laptop é simultaneamente servidor (API + banco) e cliente (browser embutido); na Arena, um nó é eleito primary pelo replica set do MongoDB com failover automático (cluster mDNS, Fase 7).
+
+**Documento de arquitetura:** `docs/arquitetura.md`
 **Regras do projeto:** `CLAUDE.md`
-**Referências de bracket (chaves de luta):** `docs/zempo-modelos/`
+**Referências de bracket:** `docs/zempo-modelos/`
 
 ---
 
@@ -23,8 +27,8 @@ Sensei Hub é uma plataforma **local-first** para gestão de academias de judô 
 
 | Camada | Tecnologia | Versão |
 |--------|-----------|--------|
-| Runtime | Node.js | 26.x (dev); 24 LTS (produção — target do bootstrap.sh) |
-| Linguagem | TypeScript | 5.9.x |
+| Runtime | Node.js | 24 LTS (produção) |
+| Linguagem | TypeScript | 5.8.x |
 | Backend | Fastify | 5.x |
 | Banco de dados | MongoDB | 7.x (Replica Set) |
 | ODM | Mongoose | 8.x |
@@ -41,28 +45,49 @@ Sensei Hub é uma plataforma **local-first** para gestão de academias de judô 
 
 ```
 sensei-hub/
-├── packages/
-│   ├── shared/              # Tipos TypeScript + schemas Zod compartilhados
-│   │   └── src/domain/      # athlete.ts, bracket.ts, event.ts, scoreboard.ts, user.ts
-│   ├── server/              # API Fastify 5
-│   │   └── src/
-│   │       ├── config/      # env.ts, database.ts
-│   │       ├── middleware/  # authenticate.ts, authorize.ts
-│   │       ├── repositories/# Models Mongoose (UserModel, AcademyModel, ...)
-│   │       ├── services/    # AuthService, UserService, ...
-│   │       ├── routes/      # auth.ts, users.ts, setup.ts, health.ts
-│   │       └── __tests__/   # Testes de integração (app.inject + memory server)
-│   ├── web/                 # Next.js 15 (frontend PWA)
-│   └── app/                 # Electron (supervisor de processos + kiosk)
+├── apps/
+│   ├── dojo/                 # Sensei Dojô — gestão de academia
+│   │   ├── shared/           # @dojo/shared — schemas Zod (atleta, guardian, faixa, peso)
+│   │   ├── server/           # @dojo/server — Fastify :3101 (db senseihub_dojo, replSet dojo-rs)
+│   │   ├── web/              # @dojo/web — Next.js :3100
+│   │   └── desktop/          # @dojo/desktop — Electron (janela simples)
+│   └── arena/                # Sensei Arena — gestão de campeonato
+│       ├── shared/           # @arena/shared — evento, divisão, bracket, scoreboard, competidor…
+│       ├── server/           # @arena/server — Fastify :3001 (db senseihub_arena, replSet sensei-rs) + cluster mDNS
+│       ├── web/              # @arena/web — Next.js :3000 (PWA/offline)
+│       └── desktop/          # @arena/desktop — Electron (kiosk/placar + arbiter)
+├── packages/                 # Código técnico compartilhado pelos dois produtos
+│   ├── shared/               # @sensei-hub/shared — Belt/Gender/WeightSource, BELT_LABEL_PT,
+│   │                         #   ATHLETE_SHEET_HEADERS (contrato do .xlsx), cpf, user/roles/academy
+│   ├── core-server/          # @sensei-hub/core-server — env (createEnv), database, authenticate/authorize,
+│   │                         #   models Academy/User/RefreshToken/AuditLog, Auth/UserService,
+│   │                         #   rotas auth/users/setup/health, AuthCtx; subpath ./testing (helper mongo in-memory)
+│   ├── core-web/             # @sensei-hub/core-web — api client, labels comuns, LoginPage/SetupPage
+│   └── desktop-runtime/      # @sensei-hub/desktop-runtime — supervisor parametrizado + kiosk + createDesktopApp()
 ├── docs/
 │   ├── arquitetura.md
-│   ├── status-e-plano.md    # Este documento
-│   └── zempo-modelos/       # Referências de formatos de bracket e cadastro
-├── docker-compose.yml       # 3 nós MongoDB em replica set (dev)
+│   ├── status-e-plano.md     # Este documento
+│   └── zempo-modelos/        # Referências de formatos de bracket e cadastro
+├── scripts/                  # dev-run.mjs e package-app.mjs (parametrizados por produto)
 ├── turbo.json
 ├── tsconfig.base.json
-└── pnpm-workspace.yaml
+└── pnpm-workspace.yaml       # packages/* + apps/*/*
 ```
+
+**Comandos por produto:** `pnpm dev:dojo` / `pnpm dev:arena` (sobem mongo in-memory + server + web); `pnpm package:dojo` / `pnpm package:arena` (empacotam o Electron). `pnpm typecheck` / `pnpm test` / `pnpm build` cobrem todos os pacotes.
+
+### 3.1 Pontes de domínio da separação
+
+- **AuthCtx** (antes `AthleteCtx`): contexto de autenticação genérico (`userId, academyId, role, sessionId, ip`), agora em `@sensei-hub/core-server`, usado por todos os services dos dois produtos.
+- **Atleta vs. competidor:** o Dojô mantém o `Athlete` completo (anamnese, matrícula, Guardian, BeltRecord). A Arena tem um **competidor slim** próprio (`CompetitorService` + schema em `@arena/shared`) — sem anamnese/matrícula, responsável como texto livre, e sempre ligado a um evento via `EventEntry` (o antigo `scope: 'event-only'` deixou de existir). O model mongoose da Arena continua chamado `'Athlete'` para preservar os refs `athleteId`.
+- **Peso:** `WeightRecord` do Dojô é acompanhamento do atleta (sem `eventId`); o da Arena é pesagem oficial de evento (`eventId` obrigatório).
+- **Contrato de arquivo Dojô→Arena:** colunas (`ATHLETE_SHEET_HEADERS`) e rótulos de faixa (`BELT_LABEL_PT`) vivem em `@sensei-hub/shared`; o `ExportService` do Dojô e o `ImportService` da Arena derivam dos mesmos valores, então não podem divergir.
+
+---
+
+## HISTÓRICO DE IMPLEMENTAÇÃO (fases 0–7, pré-separação)
+
+_As seções abaixo descrevem o desenvolvimento do monolito original e são mantidas como registro. Ver a nota no topo sobre a correspondência de caminhos de arquivo._
 
 ---
 

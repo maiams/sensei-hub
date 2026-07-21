@@ -37,7 +37,7 @@ export interface SupervisorConfig {
   arbiterMongoPort?: number
   replicaSetName?: string
   /**
-   * Path to the Next.js standalone server.js (packages/web, output:
+   * Path to the Next.js standalone server.js (apps/<product>/web, output:
    * 'standalone'). Null in dev — the web UI is assumed to already be
    * running externally (e.g. `next dev`, as `scripts/dev-run.mjs` does).
    * When set, Supervisor spawns it as a third process and gates
@@ -267,7 +267,7 @@ export class Supervisor {
     throw new Error('Server did not become healthy within 30s')
   }
 
-  // Spawns the Next.js standalone server.js (packages/web, output:
+  // Spawns the Next.js standalone server.js (apps/<product>/web, output:
   // 'standalone'). It talks to the Fastify API through its own baked-in
   // rewrite (next.config.ts: /api/* -> http://localhost:<serverPort>), so
   // no extra wiring is needed here beyond the port it listens on itself.

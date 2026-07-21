@@ -41,11 +41,11 @@ export class BracketService {
     // decided deterministically by `seed`, same as any other unseeded
     // athlete in the engine.
     //
-    // clubId: prefers Athlete.clubName (set on scope:'event-only' athletes
-    // imported from a visiting academy, Fase 3D) so same-club separation
-    // actually distinguishes visiting clubs from each other. Falls back to
-    // the entry's academyId — always the single installed academy — which
-    // groups every home-academy athlete under one club, same as before 3D.
+    // clubId: prefers the competitor's clubName (free-text home club, set on
+    // import or manual registration) so same-club separation actually
+    // distinguishes clubs from each other. Falls back to the entry's
+    // academyId — the host organization — which groups everyone with no club
+    // under one bucket.
     const athletes = await AthleteModel.find({ _id: { $in: eligible.map((e) => e.athleteId) } })
     const clubNameByAthleteId = new Map(athletes.map((a) => [a._id.toString(), a.clubName]))
     const slots: AthleteSlot[] = eligible.map((e) => ({

@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-// Mirrors packages/server/src/domain/bracket/types.ts (the Fase 3B pure
+// Mirrors apps/arena/server/src/domain/bracket/types.ts (the Fase 3B pure
 // engine) — see docs/status-e-plano.md, Fase 3B/3C. This file only adds the
 // HTTP/persistence layer (Zod schemas for request bodies and stored
 // documents); the engine's vocabulary (stage names, Portuguese repechage

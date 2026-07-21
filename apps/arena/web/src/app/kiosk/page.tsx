@@ -1,6 +1,6 @@
 'use client'
 
-// Landing page for the Sensei Hub Electron launcher window (packages/app/
+// Landing page for the Sensei Arena Electron launcher window (packages/desktop-runtime/
 // src/kiosk.ts createLauncherWindow). Only the scoreboard/operate screens
 // run fullscreen kiosk (CLAUDE.md decision: "gerenciamento de academia pode
 // ser por navegador normal, apenas o placar e a gestão de placar em tela

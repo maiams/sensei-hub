@@ -179,7 +179,7 @@ describe('POST /api/events/:id/import', () => {
     expect(res.statusCode).toBe(403)
   })
 
-  it('imports valid rows: creates event-only athletes with clubName and registered entries', async () => {
+  it('imports valid rows: creates competitors with clubName and registered entries', async () => {
     const token = await setupAdmin()
     const event = await createEvent(token)
     await createDivision(token, event.id) // open division (no age/weight restriction) — matches anyone
