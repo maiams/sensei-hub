@@ -11,14 +11,15 @@
     "build": "turbo run build",
     "dev": "turbo run dev",
     "dev:run": "node scripts/dev-run.mjs",
-    "package:app": "node scripts/package-app.mjs",
     "fetch:mongodb": "node scripts/fetch-mongodb.mjs",
     "test": "turbo run test",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "clean": "turbo run clean",
     "dev:dojo": "node scripts/dev-run.mjs dojo",
-    "dev:arena": "node scripts/dev-run.mjs arena"
+    "dev:arena": "node scripts/dev-run.mjs arena",
+    "package:dojo": "node scripts/package-app.mjs dojo",
+    "package:arena": "node scripts/package-app.mjs arena"
   },
   "devDependencies": {
     "turbo": "^2.5.4",

@@ -11,6 +11,10 @@ export interface SupervisorConfig {
   /** Network interface mongod binds to. '127.0.0.1' for single-node dev; '0.0.0.0' for cluster. */
   bindIp?: string
   serverPort?: number
+  /** Port the primary mongod listens on. Distinct per product so the two
+   *  Sensei Hub apps can run side by side on one machine (dojo 27117,
+   *  arena 27017). The arbiter port is derived as mongoPort + 1 by default. */
+  mongoPort?: number
   mongodbUri?: string
   jwtSecret?: string
   /**
@@ -64,6 +68,7 @@ export class Supervisor {
 
   private readonly bindIp: string
   private readonly serverPort: number
+  private readonly mongoPort: number
   private readonly mongodbUri: string
   private readonly jwtSecret: string
   private readonly clusterEnabled: boolean
@@ -85,12 +90,13 @@ export class Supervisor {
   ) {
     this.bindIp = config.bindIp ?? '127.0.0.1'
     this.serverPort = config.serverPort ?? 3001
-    this.mongodbUri = config.mongodbUri ?? `mongodb://127.0.0.1:27017/senseihub?replicaSet=sensei-rs`
+    this.mongoPort = config.mongoPort ?? 27017
+    this.mongodbUri = config.mongodbUri ?? `mongodb://127.0.0.1:${this.mongoPort}/senseihub?replicaSet=sensei-rs`
     this.jwtSecret = config.jwtSecret ?? 'dev-secret-change-in-production-min-32-chars'
     this.clusterEnabled = config.clusterEnabled ?? false
     this.clusterEnv = config.clusterEnv ?? {}
     this.arbiterDataDir = config.arbiterDataDir
-    this.arbiterMongoPort = config.arbiterMongoPort ?? 27018
+    this.arbiterMongoPort = config.arbiterMongoPort ?? this.mongoPort + 1
     this.replicaSetName = config.replicaSetName ?? 'sensei-rs'
     this.webScript = config.webScript ?? null
     this.webPort = config.webPort ?? 3000
@@ -158,7 +164,7 @@ export class Supervisor {
       '--replSet', this.replicaSetName,
       '--dbpath', this.mongoDataDir,
       '--bind_ip', this.bindIp,
-      '--port', '27017',
+      '--port', String(this.mongoPort),
       '--wiredTigerCacheSizeGB', '0.5',
     ]
 
@@ -174,7 +180,7 @@ export class Supervisor {
   private async waitForMongoPort(timeoutMs = 30_000): Promise<void> {
     const deadline = Date.now() + timeoutMs
     while (Date.now() < deadline) {
-      if (await this.checkTcpPort('127.0.0.1', 27017)) return
+      if (await this.checkTcpPort('127.0.0.1', this.mongoPort)) return
       await sleep(500)
     }
     throw new Error('MongoDB did not start within 30s')
@@ -185,7 +191,7 @@ export class Supervisor {
    * Safe to call multiple times — idempotent.
    */
   private async initReplicaSetIfNeeded(timeoutMs = 15_000): Promise<void> {
-    const client = new MongoClient('mongodb://127.0.0.1:27017', {
+    const client = new MongoClient(`mongodb://127.0.0.1:${this.mongoPort}`, {
       directConnection: true,
       serverSelectionTimeoutMS: timeoutMs,
     })
@@ -206,7 +212,7 @@ export class Supervisor {
         await admin.command({
           replSetInitiate: {
             _id: this.replicaSetName,
-            members: [{ _id: 0, host: '127.0.0.1:27017', priority: 1 }],
+            members: [{ _id: 0, host: `127.0.0.1:${this.mongoPort}`, priority: 1 }],
           },
         })
         console.log('[supervisor] replica set initiated')

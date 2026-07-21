@@ -3,8 +3,19 @@ import * as path from 'path'
 import { networkInterfaces } from 'node:os'
 import QRCode from 'qrcode'
 
-const APP_ORIGIN = 'http://localhost:3000'
 const EMERGENCY_EXIT_KEY = 'ctrl+alt+shift+q'
+
+// Set once by createDesktopApp() before any window is created. Distinct per
+// product (dojo :3100, arena :3000) so the same runtime serves both.
+let APP_ORIGIN = 'http://localhost:3000'
+let WEB_PORT = 3000
+let PRODUCT_NAME = 'Sensei Hub'
+
+export function configureKiosk(config: { appOrigin: string; webPort: number; productName: string }): void {
+  APP_ORIGIN = config.appOrigin
+  WEB_PORT = config.webPort
+  PRODUCT_NAME = config.productName
+}
 
 // Only the scoreboard/operate screens run fullscreen kiosk now — academy
 // management (athletes, events, settings) is meant to be used from a normal
@@ -22,10 +33,10 @@ function preloadPath(file: string): string {
   return path.join(__dirname, file)
 }
 
-export function createLauncherWindow(url: string): BrowserWindow {
+export function createLauncherWindow(url: string, size: { width: number; height: number } = { width: 480, height: 560 }): BrowserWindow {
   launcherWin = new BrowserWindow({
-    width: 480,
-    height: 560,
+    width: size.width,
+    height: size.height,
     backgroundColor: '#0f172a',
     webPreferences: {
       preload: preloadPath('preload.js'),
@@ -128,7 +139,7 @@ export function showLoadingOverlay(): void {
     .executeJavaScript(
       `
     document.body.insertAdjacentHTML('beforeend',
-      '<div id="sh-loading" style="position:fixed;inset:0;background:#0f172a;display:flex;align-items:center;justify-content:center;z-index:9999;color:white;font-family:sans-serif;font-size:1.5rem">Iniciando Sensei Hub…</div>'
+      '<div id="sh-loading" style="position:fixed;inset:0;background:#0f172a;display:flex;align-items:center;justify-content:center;z-index:9999;color:white;font-family:sans-serif;font-size:1.5rem">Iniciando ${PRODUCT_NAME}…</div>'
     )
   `,
     )
@@ -200,7 +211,7 @@ async function showAccessQrCode(win: BrowserWindow): Promise<void> {
   const ip = findLanAddress()
   if (!ip || win.isDestroyed()) return
 
-  const url = `http://${ip}:3000`
+  const url = `http://${ip}:${WEB_PORT}`
   let svg: string
   try {
     svg = await QRCode.toString(url, { type: 'svg', margin: 1, width: 120 })

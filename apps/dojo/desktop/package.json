@@ -1,0 +1,45 @@
+{
+  "name": "@dojo/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/main.js",
+  "scripts": {
+    "dev": "electron .",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "package": "electron-builder",
+    "clean": "rm -rf dist release"
+  },
+  "dependencies": {
+    "@sensei-hub/desktop-runtime": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.10",
+    "electron": "^36.4.0",
+    "electron-builder": "^25.1.8",
+    "typescript": "^5.8.3"
+  },
+  "build": {
+    "appId": "com.sensei-hub.dojo",
+    "productName": "Sensei Dojô",
+    "directories": {
+      "output": "release"
+    },
+    "extraResources": [
+      { "from": "../server/deploy", "to": "server", "filter": ["**/*"] },
+      { "from": "../web/.next/standalone", "to": "web", "filter": ["**/*"] }
+    ],
+    "win": {
+      "target": "nsis",
+      "extraResources": [{ "from": "../../../resources/mongodb/win-${arch}", "to": "mongodb", "filter": ["**/*"] }]
+    },
+    "mac": {
+      "target": "dmg",
+      "extraResources": [{ "from": "../../../resources/mongodb/mac-${arch}", "to": "mongodb", "filter": ["**/*"] }]
+    },
+    "linux": {
+      "target": "AppImage",
+      "extraResources": [{ "from": "../../../resources/mongodb/linux-${arch}", "to": "mongodb", "filter": ["**/*"] }]
+    }
+  }
+}
