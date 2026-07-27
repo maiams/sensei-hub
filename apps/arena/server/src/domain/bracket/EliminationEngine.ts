@@ -113,13 +113,34 @@ export class EliminationEngine implements BracketEngine {
       }
     }
 
-    // Resolve byes top-down: by the time round r is processed, any bye
-    // propagated in from round r-1 has already been written into round r's
-    // slots, so this single pass correctly handles chained/double byes.
+    // Resolve byes bottom-up (round 1 first). A match may only be marked as
+    // a bye/phantom — "nobody needs to fight here, the outcome is already
+    // known at generation time" — when it's a round-1 match (fill status is
+    // 100% structural there) OR a later-round match whose BOTH feeders are
+    // themselves already phantom. If either feeder is a genuine two-athlete
+    // contest (decided or not — generation always happens before any match
+    // is played), the downstream slot MUST stay pending: resolving it early
+    // would silently promote the bye recipient past an undecided real match,
+    // making the next round — or even the final — look "ready" before the
+    // actual semifinal has been fought. This was a real bug: with 5 or 6
+    // athletes in a Chave-8, a round-1 bye recipient was auto-advanced two
+    // rounds into the final while their true semifinal opponent's match had
+    // not even been played yet. See bracket.eliminationByeIntegrity.test.ts.
+    const phantom = new Set<number>()
     for (let round = 1; round < rounds; round++) {
       const count = matchesInRound(size, round)
       for (let i = 0; i < count; i++) {
-        resolveByeIfNeeded(findMatch(matchNumberFor(size, round, i)), matches)
+        const m = findMatch(matchNumberFor(size, round, i))
+        if (round > 1) {
+          const leftFeeder = findMatch(matchNumberFor(size, round - 1, i * 2))
+          const rightFeeder = findMatch(matchNumberFor(size, round - 1, i * 2 + 1))
+          if (!phantom.has(leftFeeder.matchNumber) || !phantom.has(rightFeeder.matchNumber)) {
+            continue // at least one feeder is a live, undecided contest
+          }
+        }
+        if (m.athleteAId !== null && m.athleteBId !== null) continue // genuine contest, not phantom
+        phantom.add(m.matchNumber)
+        resolveByeIfNeeded(m, matches)
       }
     }
 
