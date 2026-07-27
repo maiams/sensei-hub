@@ -23,7 +23,7 @@ export const ScoreType = z.enum(['ippon', 'wazaari', 'yuko', 'shido'])
 export type ScoreType = z.infer<typeof ScoreType>
 
 // Suggested values for Match.result.method (free string in the bracket API).
-export const VICTORY_METHODS = ['ippon', 'wazaari', 'yuko', 'hansoku-make', 'decisao', 'wo'] as const
+export const VICTORY_METHODS = ['ippon', 'wazaari', 'yuko', 'hansoku-make', 'decisao', 'desistencia', 'wo'] as const
 
 export const SideScore = z.object({
   ippon: z.number().int().min(0).max(1),

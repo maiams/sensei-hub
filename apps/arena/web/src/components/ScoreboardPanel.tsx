@@ -7,7 +7,8 @@
 // it ticking.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { apiFetch, ApiError } from '../lib/api'
+import { hasMinRole, type UserRole } from '@sensei-hub/shared'
+import { apiFetch, ApiError, getCurrentRole } from '../lib/api'
 import { translateApiError } from '../lib/labels'
 
 export interface ScoreboardDTO {
@@ -60,6 +61,7 @@ const METHOD_OPTIONS = [
   { value: 'yuko', label: 'Yuko' },
   { value: 'hansoku-make', label: 'Hansoku-make' },
   { value: 'decisao', label: 'Decisão' },
+  { value: 'desistencia', label: 'Desistência' },
   { value: 'wo', label: 'W.O.' },
 ]
 
@@ -83,11 +85,22 @@ export function ScoreboardPanel({
   const [busy, setBusy] = useState(false)
   const [winnerSide, setWinnerSide] = useState<'A' | 'B' | null>(null)
   const [winnerMethod, setWinnerMethod] = useState('ippon')
+  // O mesário (scoreboard_operator) não cancela mais luta — depois de
+  // iniciada, só resta declarar o vencedor. Abortar (luta com atletas
+  // errados etc.) fica restrito a event_manager+; a checagem real é no
+  // servidor (POST /scoreboards/:sid/abort exige o papel), isto aqui só
+  // evita mostrar um botão que a API vai recusar.
+  const [canAbort, setCanAbort] = useState(false)
   const busyRef = useRef(false)
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 100)
     return () => clearInterval(t)
+  }, [])
+
+  useEffect(() => {
+    const role = getCurrentRole()
+    setCanAbort(role !== null && hasMinRole(role as UserRole, 'event_manager'))
   }, [])
 
   const action = useCallback(
@@ -321,9 +334,13 @@ export function ScoreboardPanel({
                 <span title="Ippon">{side.ippon}</span>
                 <span title="Waza-ari">{side.wazaari}</span>
                 <span title="Yuko">{side.yuko}</span>
-                <span className="ml-auto flex items-center gap-1" title="Shido">
+                <span
+                  className="ml-auto flex items-center gap-1"
+                  title="Shido"
+                  aria-label={`${side.shido} ${side.shido === 1 ? 'shido' : 'shidos'}`}
+                >
                   {Array.from({ length: side.shido }).map((_, i) => (
-                    <span key={i} className="inline-block h-3 w-3 rounded-full bg-red-500" />
+                    <span key={i} className="inline-block h-3 w-3 rounded-full bg-red-500" aria-hidden="true" />
                   ))}
                 </span>
               </div>
@@ -381,14 +398,17 @@ export function ScoreboardPanel({
           >
             Declarar vencedor
           </button>
-          <button
-            type="button"
-            onClick={handleAbort}
-            disabled={busy}
-            className="ml-auto rounded-lg border border-red-900 px-4 py-3 text-sm text-red-400 hover:bg-red-950 disabled:opacity-60"
-          >
-            Cancelar luta
-          </button>
+          {canAbort && (
+            <button
+              type="button"
+              onClick={handleAbort}
+              disabled={busy}
+              title="Uso excepcional: atletas errados na mesa, etc. Não é uma opção do mesário."
+              className="ml-auto rounded-lg border border-red-900 px-4 py-3 text-sm text-red-400 hover:bg-red-950 disabled:opacity-60"
+            >
+              Cancelar luta (atletas errados)
+            </button>
+          )}
         </div>
       ) : (
         <div className="rounded-lg border border-emerald-800 bg-emerald-950/30 p-4">
@@ -419,7 +439,7 @@ export function ScoreboardPanel({
               disabled={busy}
               className="rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-emerald-500 disabled:opacity-60"
             >
-              Confirmar
+              Confirmar vencedor
             </button>
             <button
               type="button"
@@ -429,6 +449,11 @@ export function ScoreboardPanel({
               Voltar
             </button>
           </div>
+          <p className="mt-3 text-sm text-emerald-200">
+            <strong>{sb.sides[winnerSide].displayName}</strong> vence por{' '}
+            <strong>{METHOD_OPTIONS.find((o) => o.value === winnerMethod)?.label ?? winnerMethod}</strong>.
+            Esta ação encerra a luta e não pode ser desfeita.
+          </p>
           {suggestedWinner && (
             <p className="mt-2 text-xs text-slate-400">
               Sugestão do placar: {sb.sides[suggestedWinner.side].displayName} por {suggestedWinner.method}.

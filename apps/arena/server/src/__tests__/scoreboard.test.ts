@@ -2,6 +2,8 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest'
 import { connectTestDb, closeTestDb, clearTestDb } from '@sensei-hub/core-server/testing'
 import { buildApp } from '../app.js'
 import { ScoreboardModel } from '../repositories/ScoreboardModel.js'
+import { MatchModel } from '../repositories/MatchModel.js'
+import { AuditLogModel } from '@sensei-hub/core-server'
 import { scoreboardEvents } from '../services/ScoreboardService.js'
 import type { FastifyInstance } from 'fastify'
 
@@ -118,6 +120,7 @@ async function setupFight(options: {
   divisionRules?: Record<string, unknown>
   eventOverrides?: Record<string, unknown>
   athleteOverrides?: Record<string, unknown>[]
+  athleteCount?: number
 } = {}) {
   const token = await setupAdmin()
   const eventRes = await app.inject({
@@ -137,7 +140,7 @@ async function setupFight(options: {
   const divisionId = divisionRes.json<{ id: string }>().id
 
   const athleteIds: string[] = []
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < (options.athleteCount ?? 3); i++) {
     athleteIds.push(await confirmedEntry(token, eventId, divisionId, options.athleteOverrides?.[i] ?? {}))
   }
 
@@ -394,6 +397,38 @@ describe('Scoreboard lifecycle', () => {
       ).statusCode,
     ).toBe(403)
   })
+
+  // The mesário does not cancel a fight anymore — only event_manager+ can
+  // abort (wrong athletes at the table, etc.), reason required, audited.
+  // Hiding the button client-side is not authorization, so this must be
+  // enforced server-side regardless of what the UI shows.
+  it('RBAC: abort requires event_manager+, not just scoreboard_operator', async () => {
+    const { token, eventId, areaId, match } = await setupFight()
+    const operatorToken = await createUserAndLogin(token, 'scoreboard_operator', 'mesario@test.com')
+    const managerToken = await createUserAndLogin(token, 'event_manager', 'gerente@test.com')
+
+    const sb1 = (await startScoreboard(token, eventId, areaId, match.id)).json<ScoreboardDTO>()
+    const deniedRes = await act(operatorToken, sb1.id, 'abort', { reason: 'atletas errados na mesa' })
+    expect(deniedRes.statusCode).toBe(403)
+
+    // still active — the denied attempt did not mutate anything
+    const stillActive = await act(token, sb1.id, 'clock/start')
+    expect(stillActive.statusCode).toBe(200)
+    expect(stillActive.json<ScoreboardDTO>().status).toBe('active')
+
+    const allowedRes = await act(managerToken, sb1.id, 'abort', { reason: 'atletas errados na mesa' })
+    expect(allowedRes.statusCode).toBe(200)
+    expect(allowedRes.json<ScoreboardDTO>().status).toBe('aborted')
+
+    // audited with the reason and the actual actor (the manager, not the denied operator)
+    const auditEntry = await AuditLogModel.findOne({
+      entityType: 'Scoreboard',
+      entityId: sb1.id,
+      fieldName: 'status',
+      newValue: 'aborted',
+    })
+    expect(auditEntry?.reason).toBe('atletas errados na mesa')
+  })
 })
 
 describe('Public payloads and privacy', () => {
@@ -479,6 +514,30 @@ describe('Public payloads and privacy', () => {
       .filter((a) => a.restingUntil !== null)
     expect(resting.length).toBeGreaterThan(0)
     void athleteIds
+  })
+
+  it('orders the upcoming queue by matchNumber, not by last-updated (the venue board must be predictable)', async () => {
+    // 4 athletes → rodizio round-robin = 6 matches; one gets dispatched to
+    // the area, leaving 5 upcoming — enough to prove ordering isn't by chance.
+    const { eventId, areaId, match } = await setupFight({ athleteCount: 4 })
+    void areaId
+    void match
+
+    // Touch matches in reverse order so `updatedAt` (the old, buggy sort key)
+    // would come out backwards if it were still in play.
+    const allMatches = await MatchModel.find({ eventId }).sort({ matchNumber: 1 })
+    for (const m of [...allMatches].reverse()) {
+      await MatchModel.updateOne({ _id: m._id }, { $set: { updatedAt: new Date() } })
+    }
+
+    const res = await app.inject({ method: 'GET', url: `/api/public/events/${eventId}/display` })
+    expect(res.statusCode).toBe(200)
+    const display = res.json<{ upcoming: Array<{ matchNumber: number }> }>()
+
+    expect(display.upcoming.length).toBeGreaterThan(1)
+    const numbers = display.upcoming.map((m) => m.matchNumber)
+    const sorted = [...numbers].sort((a, b) => a - b)
+    expect(numbers).toEqual(sorted)
   })
 })
 

@@ -32,6 +32,12 @@ export async function scoreboardRoutes(app: FastifyInstance): Promise<void> {
   }
 
   const operator = { preHandler: [authenticate, authorize('scoreboard_operator')] }
+  // Abort is not a mesário action anymore: once a fight starts, the only way
+  // out is a declared result (ippon/hansoku-make/wo/desistência/decisão). A
+  // wrong-athletes start still needs an escape hatch, so it stays available
+  // one tier up (event_manager+), reason-required and audited — see
+  // ScoreboardService#abortScoreboard.
+  const abortRole = { preHandler: [authenticate, authorize('event_manager')] }
 
   app.post('/events/:id/areas/:aid/scoreboard', operator, async (request, reply) => {
     const { id, aid } = request.params as { id: string; aid: string }
@@ -180,7 +186,7 @@ export async function scoreboardRoutes(app: FastifyInstance): Promise<void> {
     }
   })
 
-  app.post('/scoreboards/:sid/abort', operator, async (request, reply) => {
+  app.post('/scoreboards/:sid/abort', abortRole, async (request, reply) => {
     const { sid } = request.params as { sid: string }
     const parsed = AbortScoreboardInput.safeParse(request.body)
     if (!parsed.success) {

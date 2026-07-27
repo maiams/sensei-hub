@@ -28,8 +28,12 @@ export class PublicDisplayService {
       })),
     )
 
-    // Upcoming = every ready match not yet claimed by an area, in the same
-    // oldest-ready-first order the dispatcher uses.
+    // Upcoming = every ready match not yet claimed by an area. Ordered by
+    // division then matchNumber — the order of dispute an athlete can
+    // actually anticipate on the venue board. `updatedAt` used to be the sort
+    // key, but it reflects "last touched", not "next in line": anything that
+    // re-saves a match (dispatch/rest checks/corrections elsewhere) bumps it,
+    // so the queue reshuffled unpredictably on screen.
     const activeBrackets = await BracketModel.find({ eventId, status: 'active' })
     const upcomingDocs = await MatchModel.find({
       bracketId: { $in: activeBrackets.map((b) => b._id) },
@@ -38,7 +42,7 @@ export class PublicDisplayService {
       athleteBId: { $ne: null },
       result: null,
     })
-      .sort({ updatedAt: 1 })
+      .sort({ divisionId: 1, matchNumber: 1 })
       .limit(12)
 
     const divisionIds = [...new Set(upcomingDocs.map((m) => m.divisionId.toString()))]
