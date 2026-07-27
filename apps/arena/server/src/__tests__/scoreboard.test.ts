@@ -34,8 +34,8 @@ interface ScoreboardDTO {
   clock: { clockMs: number; running: boolean; lastStartedAt: string | null; countsUp: boolean }
   osaekomi: { holder: 'A' | 'B'; startedAt: string } | null
   sides: {
-    A: { athleteId: string; displayName: string; ippon: number; wazaari: number; yuko: number; shido: number; hansokuMake: boolean }
-    B: { athleteId: string; displayName: string; ippon: number; wazaari: number; yuko: number; shido: number; hansokuMake: boolean }
+    A: { athleteId: string; displayName: string; identity: string | null; ippon: number; wazaari: number; yuko: number; shido: number; hansokuMake: boolean }
+    B: { athleteId: string; displayName: string; identity: string | null; ippon: number; wazaari: number; yuko: number; shido: number; hansokuMake: boolean }
   }
   winner: { athleteId: string; method: string } | null
 }
@@ -458,6 +458,47 @@ describe('Public payloads and privacy', () => {
     for (const adult of ['José Oliveira', 'Pedro Souza']) {
       if (operatorNames.includes(adult)) expect(publicNames).toContain(adult)
     }
+  })
+
+  it('gives the operator a resolved identity label per side, but never exposes it on the public payload', async () => {
+    const { token, eventId, areaId, match } = await setupFight({
+      athleteOverrides: [
+        {
+          fullName: 'Alice Alves Rodrigues',
+          birthDate: '2012-04-01',
+          cpf: '11144477735',
+          guardianName: 'Resp Alves',
+          guardianPhone: '11999990001',
+        },
+        {
+          fullName: 'Alice Gomes Rodrigues',
+          birthDate: '2014-06-10',
+          guardianName: 'Resp Gomes',
+          guardianPhone: '11999990002',
+        },
+        { fullName: 'Terceira Atleta', birthDate: '1990-01-01' },
+      ],
+    })
+
+    const sb = (await startScoreboard(token, eventId, areaId, match.id)).json<ScoreboardDTO>()
+    // Whichever two of the three fought, the operator sees a non-empty identity for both.
+    expect(sb.sides.A.identity).toBeTruthy()
+    expect(sb.sides.B.identity).toBeTruthy()
+    // The CPF-derived one is masked — the raw number never appears.
+    for (const side of [sb.sides.A, sb.sides.B]) {
+      if (side.displayName === 'Alice Alves Rodrigues') {
+        expect(side.identity).toBe('CPF ***.***.***-35')
+      }
+      if (side.displayName === 'Alice Gomes Rodrigues') {
+        expect(side.identity).toBe('nasc. 2014')
+      }
+    }
+    expect(JSON.stringify(sb)).not.toContain('11144477735')
+
+    const pub = await app.inject({ method: 'GET', url: `/api/public/areas/${areaId}/scoreboard` })
+    const publicSb = pub.json<{ scoreboard: ScoreboardDTO }>().scoreboard
+    expect(publicSb.sides.A.identity).toBeNull()
+    expect(publicSb.sides.B.identity).toBeNull()
   })
 
   it('broadcasts the privacy-filtered public DTO on every mutation', async () => {

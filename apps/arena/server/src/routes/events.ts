@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { z } from 'zod'
-import { CreateEventInput, UpdateEventInput, CreateDivisionInput, UpdateDivisionInput, ImportDivisionsFromTemplatesInput, CreateEventEntryInput, RecordWeighInInput, ConfirmEntryInput, WithdrawEntryInput, EventEntryStatus, GenerateBracketInput, RecordMatchResultInput, CorrectMatchResultInput } from '@arena/shared'
+import { CreateEventInput, UpdateEventInput, CreateDivisionInput, UpdateDivisionInput, ImportDivisionsFromTemplatesInput, CreateEventEntryInput, RecordWeighInInput, ConfirmEntryInput, WithdrawEntryInput, MoveEntryInput, EventEntryStatus, GenerateBracketInput, RecordMatchResultInput, CorrectMatchResultInput } from '@arena/shared'
 import { EventService, EventServiceError } from '../services/EventService.js'
 import { DivisionService, DivisionServiceError } from '../services/DivisionService.js'
 import { EventEntryService, EventEntryServiceError } from '../services/EventEntryService.js'
@@ -277,6 +277,40 @@ export async function eventRoutes(app: FastifyInstance): Promise<void> {
       }
       try {
         const entry = await entryService.confirmEntry(id, request.authUser.academyId, eid, parsed.data.confirmedDivisionId, ctxFrom(request))
+        return reply.send(entry)
+      } catch (err) {
+        return handleError(err, reply)
+      }
+    },
+  )
+
+  // Move an entry to a different division, at any point in its lifecycle
+  // (not just the narrow weighed_in->confirmed window confirm allows) — see
+  // EventEntryService.moveEntry for why this is a dedicated operation.
+  // event_manager only: unlike confirm's weigh_in_operator exception (a
+  // narrow, same-flow escape hatch scoped to "weighed_in" right after that
+  // operator's own weigh-in), moving freely works from any status, can
+  // archive an already-generated bracket, and is a category/tournament
+  // decision — not part of running the scale queue — so it stays at the
+  // higher bar.
+  app.patch(
+    '/events/:id/entries/:eid/move',
+    { preHandler: [authenticate, authorize('event_manager')] },
+    async (request, reply) => {
+      const { id, eid } = request.params as { id: string; eid: string }
+      const parsed = MoveEntryInput.safeParse(request.body)
+      if (!parsed.success) {
+        return reply.status(400).send({ error: 'Validation failed', details: parsed.error.flatten() })
+      }
+      try {
+        const entry = await entryService.moveEntry(
+          id,
+          request.authUser.academyId,
+          eid,
+          parsed.data.targetDivisionId,
+          parsed.data.reason,
+          ctxFrom(request),
+        )
         return reply.send(entry)
       } catch (err) {
         return handleError(err, reply)

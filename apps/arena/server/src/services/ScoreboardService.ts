@@ -9,7 +9,7 @@ import { AuditLogModel } from '@sensei-hub/core-server'
 import { applyScore, removeScore, osaekomiAward, endsFight, leader, ScoreboardRulesError } from '../domain/scoreboard/rules.js'
 import { publicDisplayName } from '../domain/publicName.js'
 import { BracketService } from './BracketService.js'
-import { CBJ_DEFAULT_MATCH_RULES } from '@arena/shared'
+import { CBJ_DEFAULT_MATCH_RULES, resolveAthleteIdentity } from '@arena/shared'
 import type { ScoreboardDTO, ScoreType, SideKey, SideScore } from '@arena/shared'
 import type { AuthCtx } from '@sensei-hub/core-server'
 
@@ -354,6 +354,7 @@ export class ScoreboardService {
         event.publicHideNamesUnderAge ?? null,
       ),
       clubName: athlete.clubName ?? null,
+      identity: resolveAthleteIdentity(athlete).label,
       ippon: 0,
       wazaari: 0,
       yuko: 0,
@@ -433,6 +434,10 @@ export class ScoreboardService {
       athleteId: s.athleteId.toString(),
       displayName: audience === 'public' ? s.publicName : s.fullName,
       clubName: s.clubName,
+      // Operator-only — the public payload must not carry an identifier
+      // that isn't needed to run the event and could help re-identify a
+      // minor (CLAUDE.md: public screens show only what the event needs).
+      identity: audience === 'public' ? null : s.identity,
       ippon: s.ippon,
       wazaari: s.wazaari,
       yuko: s.yuko,

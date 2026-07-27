@@ -4,17 +4,24 @@
 // real academy preset (52 athletes → 106 divisions, 78 empty, 17 with a
 // single athlete — see CLAUDE.md session diagnosis) a flat list is
 // unusable; this groups by age division then by group (gender/category),
-// counts entries/confirmed per division, lets the manager hide empty
-// divisions, and highlights the ones with exactly one athlete (no possible
-// opponent) since those need a decision — see DivisionDetail's
-// SingletonResolver.
+// counts entries/confirmed per division, and lets the manager hide empty
+// divisions. Divisions with exactly one athlete are called out as
+// informational (not a warning): in judô, no opponent means the athlete
+// wins the category — the normal outcome, not a problem to fix.
+//
+// This is also where "move an athlete to another category" lives: each
+// division leaf is a drag-and-drop target (drop an entry dragged from
+// DivisionDetail's roster to move it here), and MoveEntryDialog — opened
+// from either a drop or an entry row's ⋮/right-click menu — is mounted once
+// here so every division leaf shares the same dialog instance/state.
 
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useState, type DragEvent, type FormEvent } from 'react'
 import Link from 'next/link'
 import { apiFetch, ApiError } from '../../../../lib/api'
 import { translateApiError } from '../../../../lib/labels'
 import { groupDivisions, shortDivisionLabel, type DivisionLite } from './divisionGrouping'
 import { DivisionDetail, type EntryLite } from './DivisionDetail'
+import { MoveEntryDialog, ENTRY_DRAG_MIME, type MoveEntryTarget } from './MoveEntryDialog'
 
 function ageRangeLabel(minAge: number | null, maxAge: number | null): string {
   if (minAge === null && maxAge === null) return 'sem restrição de idade'
@@ -52,6 +59,9 @@ export function DivisionsPanel({
   const [expandedAge, setExpandedAge] = useState<Set<string>>(new Set())
   const [expandedSub, setExpandedSub] = useState<Set<string>>(new Set())
   const [expandedDivision, setExpandedDivision] = useState<Set<string>>(new Set())
+  const [moveRequest, setMoveRequest] = useState<{ entry: MoveEntryTarget; targetDivisionId: string | undefined } | null>(
+    null,
+  )
 
   const loadEntries = useCallback(async () => {
     try {
@@ -94,6 +104,10 @@ export function DivisionsPanel({
     } catch (err) {
       setError(err instanceof ApiError ? translateApiError(err.message) : 'Não foi possível apagar.')
     }
+  }
+
+  function requestMove(entry: MoveEntryTarget, targetDivisionId?: string) {
+    setMoveRequest({ entry, targetDivisionId })
   }
 
   function countsFor(divisionId: string) {
@@ -183,7 +197,7 @@ export function DivisionsPanel({
         <div className="mb-3 flex flex-wrap items-center gap-3 rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-sm">
           <span className="text-slate-400">
             {totalDivisions} divisões · {emptyCount} vazias
-            {singletonCount > 0 && <span className="text-amber-400"> · {singletonCount} com 1 só atleta</span>}
+            {singletonCount > 0 && <span> · {singletonCount} com 1 atleta (sem adversário)</span>}
           </span>
           <label className="flex items-center gap-1.5 text-slate-300">
             <input type="checkbox" checked={hideEmpty} onChange={(e) => setHideEmpty(e.target.checked)} />
@@ -248,17 +262,13 @@ export function DivisionsPanel({
                                 key={d.id}
                                 eventId={eventId}
                                 division={d}
-                                allDivisions={divisions}
                                 entries={entries}
                                 canManage={canManage}
                                 expanded={expandedDivision.has(d.id)}
                                 onToggle={() => toggle(expandedDivision, setExpandedDivision, d.id)}
                                 onChanged={onChanged}
                                 onDelete={handleDelete}
-                                onEntriesChanged={() => {
-                                  void loadEntries()
-                                  onEntriesChanged()
-                                }}
+                                onRequestMove={requestMove}
                               />
                             ))}
                           </div>
@@ -272,17 +282,13 @@ export function DivisionsPanel({
                       key={d.id}
                       eventId={eventId}
                       division={d}
-                      allDivisions={divisions}
                       entries={entries}
                       canManage={canManage}
                       expanded={expandedDivision.has(d.id)}
                       onToggle={() => toggle(expandedDivision, setExpandedDivision, d.id)}
                       onChanged={onChanged}
                       onDelete={handleDelete}
-                      onEntriesChanged={() => {
-                        void loadEntries()
-                        onEntriesChanged()
-                      }}
+                      onRequestMove={requestMove}
                     />
                   ))}
                 </div>
@@ -295,6 +301,21 @@ export function DivisionsPanel({
       {canManage && addingDivision && (
         <NewDivisionForm eventId={eventId} onDone={() => setAddingDivision(false)} onCreated={onChanged} />
       )}
+
+      {moveRequest && (
+        <MoveEntryDialog
+          eventId={eventId}
+          entry={moveRequest.entry}
+          divisions={divisions}
+          initialTargetDivisionId={moveRequest.targetDivisionId}
+          onClose={() => setMoveRequest(null)}
+          onMoved={() => {
+            setMoveRequest(null)
+            void loadEntries()
+            onEntriesChanged()
+          }}
+        />
+      )}
     </section>
   )
 }
@@ -302,34 +323,63 @@ export function DivisionsPanel({
 function DivisionLeaf({
   eventId,
   division,
-  allDivisions,
   entries,
   canManage,
   expanded,
   onToggle,
   onChanged,
   onDelete,
-  onEntriesChanged,
+  onRequestMove,
 }: {
   eventId: string
   division: DivisionLite
-  allDivisions: DivisionLite[]
   entries: EntryLite[]
   canManage: boolean
   expanded: boolean
   onToggle: () => void
   onChanged: () => void
   onDelete: (id: string) => void
-  onEntriesChanged: () => void
+  onRequestMove: (entry: MoveEntryTarget, targetDivisionId?: string) => void
 }) {
+  const [dragOver, setDragOver] = useState(false)
   const active = entries.filter(
     (e) => (e.confirmedDivisionId ?? e.divisionId) === division.id && e.status !== 'withdrawn' && e.status !== 'disqualified',
   )
   const isEmpty = active.length === 0
   const isSingleton = active.length === 1
 
+  // Drop target for drag-and-drop moves (a mouse-only shortcut — see
+  // MoveEntryDialog.tsx): dropping an entry here always opens the move
+  // dialog pre-filled with this division as the destination, rather than
+  // moving silently, so the same bracket-invalidation warning the ⋮
+  // menu/right-click path shows is never skipped just because the operator
+  // used drag-and-drop.
+  function handleDragOver(e: DragEvent) {
+    if (!canManage || !e.dataTransfer.types.includes(ENTRY_DRAG_MIME)) return
+    e.preventDefault()
+    setDragOver(true)
+  }
+  function handleDrop(e: DragEvent) {
+    e.preventDefault()
+    setDragOver(false)
+    const draggedId = e.dataTransfer.getData(ENTRY_DRAG_MIME)
+    const dragged = entries.find((en) => en.id === draggedId)
+    if (!dragged) return
+    const fromDivisionId = dragged.confirmedDivisionId ?? dragged.divisionId
+    if (fromDivisionId === division.id) return
+    onRequestMove(
+      { id: dragged.id, athleteName: dragged.athleteName ?? dragged.id, currentDivisionId: fromDivisionId },
+      division.id,
+    )
+  }
+
   return (
-    <div className={`rounded-lg border px-3 py-2 ${isSingleton ? 'border-amber-800 bg-amber-950/10' : 'border-slate-800 bg-slate-900'}`}>
+    <div
+      onDragOver={handleDragOver}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={handleDrop}
+      className={`rounded-lg border px-3 py-2 ${dragOver ? 'border-blue-500 bg-blue-950/20' : 'border-slate-800 bg-slate-900'}`}
+    >
       <button type="button" onClick={onToggle} className="flex w-full flex-wrap items-center justify-between gap-2 text-left">
         <span className="text-sm text-white">
           {expanded ? '▾' : '▸'} {shortDivisionLabel(division)}
@@ -337,7 +387,7 @@ function DivisionLeaf({
             {ageRangeLabel(division.minAge, division.maxAge)} · {weightLabel(division.weightLimitKg)}
           </span>
         </span>
-        <span className={`text-xs ${isEmpty ? 'text-slate-600' : isSingleton ? 'font-medium text-amber-400' : 'text-slate-400'}`}>
+        <span className={`text-xs ${isEmpty ? 'text-slate-600' : 'text-slate-400'}`}>
           {isEmpty ? 'vazia' : `${active.length} atleta(s)${isSingleton ? ' — sem adversário' : ''}`}
         </span>
       </button>
@@ -347,12 +397,11 @@ function DivisionLeaf({
           <DivisionDetail
             eventId={eventId}
             division={division}
-            allDivisions={allDivisions}
             entries={entries}
             canManage={canManage}
             onDivisionSaved={onChanged}
             onDivisionDeleted={onDelete}
-            onEntriesChanged={onEntriesChanged}
+            onRequestMove={onRequestMove}
           />
         </div>
       )}

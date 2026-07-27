@@ -52,6 +52,12 @@ export const ScoreboardSideDTO = SideScore.extend({
   // Already privacy-filtered on public payloads (Event.publicHideNamesUnderAge).
   displayName: z.string(),
   clubName: z.string().nullable(),
+  // Resolved server-side via resolveAthleteIdentity (see athleteIdentity.ts)
+  // — a short label ("Federação 12345", "CPF ***.***.***-01", "nasc. 2012")
+  // to tell apart two competitors with the same/similar name at the table.
+  // Operator audience only: always null on the public payload (the display
+  // must not show it — see ScoreboardService#toDTO).
+  identity: z.string().nullable(),
 })
 export type ScoreboardSideDTO = z.infer<typeof ScoreboardSideDTO>
 

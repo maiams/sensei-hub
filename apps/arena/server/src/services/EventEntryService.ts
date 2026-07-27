@@ -1,9 +1,12 @@
+import mongoose from 'mongoose'
 import { EventEntryModel, type EventEntryDocument } from '../repositories/EventEntryModel.js'
 import { EventModel } from '../repositories/EventModel.js'
 import { DivisionModel, type DivisionDocument } from '../repositories/DivisionModel.js'
 import { AthleteModel } from '../repositories/AthleteModel.js'
 import { AuditLogModel } from '@sensei-hub/core-server'
 import { WeightService } from './WeightService.js'
+import { BracketService } from './BracketService.js'
+import { resolveAthleteIdentity } from '@arena/shared'
 import type { AuthCtx } from '@sensei-hub/core-server'
 import type { CreateEventEntryInput, EventEntryStatus } from '@arena/shared'
 
@@ -25,12 +28,16 @@ const VALID_TRANSITIONS: Record<EventEntryStatus, EventEntryStatus[]> = {
 
 export class EventEntryService {
   #weightService = new WeightService()
+  #bracketService = new BracketService()
 
   // weigh_in_operator reads this list too (see routes/events.ts) to run its
-  // queue, so the DTO carries the athlete's display name — nothing else from
-  // the athlete registry (no CPF/phone/guardian/medical). Batched into one
-  // query, scoped to the event's own academy, so the operator can never see
-  // names for athletes outside this event's roster.
+  // queue, so the DTO carries the athlete's display name plus a resolved
+  // identity label — nothing else from the athlete registry (no CPF/phone/
+  // guardian/medical ever leaves this method; federationNumber/zempoNumber/
+  // cpf/birthDate are read here only to feed resolveAthleteIdentity, which
+  // itself never returns the raw cpf — see @arena/shared/athleteIdentity.ts).
+  // Batched into one query, scoped to the event's own academy, so the
+  // operator can never see names for athletes outside this event's roster.
   async listEntries(
     eventId: string,
     academyId: string,
@@ -43,10 +50,15 @@ export class EventEntryService {
     const entries = await EventEntryModel.find(query).sort({ createdAt: 1 })
 
     const athleteIds = [...new Set(entries.map((e) => e.athleteId.toString()))]
-    const athletes = await AthleteModel.find({ _id: { $in: athleteIds }, academyId }).select('fullName preferredName')
+    const athletes = await AthleteModel.find({ _id: { $in: athleteIds }, academyId }).select(
+      'fullName preferredName federationNumber zempoNumber cpf birthDate',
+    )
     const nameById = new Map(athletes.map((a) => [a._id.toString(), a.preferredName || a.fullName]))
+    const identityById = new Map(athletes.map((a) => [a._id.toString(), resolveAthleteIdentity(a).label]))
 
-    return entries.map((e) => this.#toDTO(e, nameById.get(e.athleteId.toString())))
+    return entries.map((e) =>
+      this.#toDTO(e, nameById.get(e.athleteId.toString()), identityById.get(e.athleteId.toString())),
+    )
   }
 
   async createManualEntry(eventId: string, academyId: string, input: CreateEventEntryInput, ctx: AuthCtx) {
@@ -226,6 +238,142 @@ export class EventEntryService {
     return this.#toDTO(entry)
   }
 
+  // Moves an entry to a different division — the normal way to send an
+  // athlete to another category (single-athlete category, weight mistake,
+  // late reclassification, etc.), *not* a transition of the check-in/weigh-in
+  // state machine: unlike confirmEntry (only legal from "weighed_in", moving
+  // the entry into "confirmed"), this works from any non-terminal status and
+  // never touches `status` itself. That's the reason this is its own
+  // operation instead of extending confirmEntry: the two have genuinely
+  // different semantics (confirm = "lock in category after weigh-in", move =
+  // "relocate regardless of where we are in the flow"), and keeping them
+  // separate makes the audit trail read unambiguously ("division changed by
+  // move" vs "status changed to confirmed"). withdrawn/disqualified are
+  // terminal and excluded, same as every other transition in this service —
+  // undoing one of those still requires a fresh entry, a known limitation.
+  //
+  // Always writes to confirmedDivisionId (never the original `divisionId`,
+  // which stays as the historical record of how the athlete first entered).
+  // Every other place in the codebase already reads the effective division
+  // as `confirmedDivisionId ?? divisionId`, so this is enough to relocate the
+  // entry everywhere (roster grouping, bracket eligibility once confirmed,
+  // weigh-in/confirm defaults) without special-casing the current status.
+  //
+  // If the origin or destination division has an active bracket, that
+  // bracket no longer reflects reality once the move happens (a participant
+  // appeared or disappeared), so it's archived — explicitly and audited, via
+  // BracketService.archiveActiveBracketForEntryMove — rather than left stale.
+  // Archiving never deletes recorded matches (see that method). Because
+  // archiving a bracket is a real loss (the manager must regenerate it), a
+  // reason is mandatory whenever this happens; a same-event move that
+  // touches no bracket can go through without one.
+  async moveEntry(
+    eventId: string,
+    academyId: string,
+    entryId: string,
+    targetDivisionId: string,
+    reason: string | undefined,
+    ctx: AuthCtx,
+  ) {
+    const entry = await this.#findEntry(eventId, academyId, entryId)
+    if (entry.status === 'withdrawn' || entry.status === 'disqualified') {
+      throw new EventEntryServiceError(`Cannot move an entry with status "${entry.status}"`, 409)
+    }
+
+    const targetDivision = await DivisionModel.findOne({ _id: targetDivisionId, eventId })
+    if (!targetDivision) {
+      throw new EventEntryServiceError('Division not found', 404)
+    }
+
+    const oldDivisionId = (entry.confirmedDivisionId ?? entry.divisionId).toString()
+    if (oldDivisionId === targetDivisionId) {
+      throw new EventEntryServiceError('Entry is already in this division', 409)
+    }
+
+    // Same duplicate guard as createManualEntry, but against the *effective*
+    // division (confirmedDivisionId ?? divisionId) of every other active
+    // entry for this athlete — the unique index on the raw divisionId field
+    // wouldn't catch this since move only ever writes confirmedDivisionId.
+    const siblingEntries = await EventEntryModel.find({
+      eventId,
+      athleteId: entry.athleteId,
+      _id: { $ne: entry._id },
+      status: { $nin: ['withdrawn', 'disqualified'] },
+    })
+    const alreadyThere = siblingEntries.some(
+      (e) => (e.confirmedDivisionId ?? e.divisionId).toString() === targetDivisionId,
+    )
+    if (alreadyThere) {
+      throw new EventEntryServiceError('Athlete already has an active entry in this division', 409)
+    }
+
+    // Read-only check, before any write: decide whether a reason is required
+    // *before* archiving anything, so a missing reason never leaves a
+    // half-applied move.
+    const [originBracket, destBracket] = await Promise.all([
+      this.#bracketService.hasActiveBracket(eventId, oldDivisionId),
+      this.#bracketService.hasActiveBracket(eventId, targetDivisionId),
+    ])
+    const destructive = originBracket || destBracket
+    if (destructive && (!reason || reason.trim().length < 3)) {
+      throw new EventEntryServiceError(
+        'A reason (at least 3 characters) is required to move an entry when it invalidates an existing bracket',
+        400,
+      )
+    }
+
+    const oldDivisionName = (await DivisionModel.findById(oldDivisionId))?.name ?? oldDivisionId
+
+    const session = await mongoose.startSession()
+    try {
+      await session.withTransaction(async () => {
+        if (originBracket) {
+          await this.#bracketService.archiveActiveBracketForEntryMove(
+            eventId,
+            oldDivisionId,
+            `Atleta movida para "${targetDivision.name}"${reason ? ` — ${reason}` : ''}`,
+            ctx,
+            session,
+          )
+        }
+        if (destBracket) {
+          await this.#bracketService.archiveActiveBracketForEntryMove(
+            eventId,
+            targetDivisionId,
+            `Atleta movida de "${oldDivisionName}"${reason ? ` — ${reason}` : ''}`,
+            ctx,
+            session,
+          )
+        }
+
+        entry.confirmedDivisionId = targetDivision._id
+        await entry.save({ session })
+
+        await AuditLogModel.create(
+          [
+            {
+              userId: ctx.userId,
+              entityType: 'EventEntry',
+              entityId: entry._id,
+              action: 'update',
+              fieldName: 'divisionId',
+              oldValue: oldDivisionId,
+              newValue: targetDivisionId,
+              reason,
+              sessionId: ctx.sessionId,
+              ip: ctx.ip,
+            },
+          ],
+          { session },
+        )
+      })
+    } finally {
+      await session.endSession()
+    }
+
+    return this.#toDTO(entry)
+  }
+
   async withdrawEntry(eventId: string, academyId: string, entryId: string, reason: string, ctx: AuthCtx) {
     const entry = await this.#findEntry(eventId, academyId, entryId)
     this.#assertTransition(entry.status, 'withdrawn')
@@ -293,7 +441,7 @@ export class EventEntryService {
     return typeof err === 'object' && err !== null && 'code' in err && (err as { code: unknown }).code === 11000
   }
 
-  #toDTO(entry: EventEntryDocument, athleteName?: string) {
+  #toDTO(entry: EventEntryDocument, athleteName?: string, athleteIdentity?: string) {
     return {
       id: entry._id.toString(),
       eventId: entry.eventId.toString(),
@@ -301,6 +449,7 @@ export class EventEntryService {
       confirmedDivisionId: entry.confirmedDivisionId?.toString(),
       athleteId: entry.athleteId.toString(),
       athleteName,
+      athleteIdentity,
       academyId: entry.academyId.toString(),
       registrationMethod: entry.registrationMethod,
       status: entry.status,
@@ -318,7 +467,7 @@ export class EventEntryService {
 export class EventEntryServiceError extends Error {
   constructor(
     message: string,
-    public readonly statusCode: 404 | 409,
+    public readonly statusCode: 400 | 404 | 409,
   ) {
     super(message)
     this.name = 'EventEntryServiceError'

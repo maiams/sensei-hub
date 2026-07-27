@@ -3,11 +3,18 @@
 // Mobile-first check-in station (Fase 5). Optimized for a phone/tablet at
 // the door: big search box, big touch-target results, one tap to confirm —
 // per CLAUDE.md "Mobile Check-In" and "UI Principles" (fast search, few
-// clicks, large controls, mistake recovery). Search reuses the existing
-// /athletes?q= endpoint (name/CPF/matrícula) rather than inventing a new
-// one. QR/short-code scanning hardware is out of scope for this pass — the
-// `method` enum reserves the values, but only staff-assisted search exists
-// today.
+// clicks, large controls, mistake recovery). Search filters the full
+// /athletes roster client-side by name/CPF/federationNumber/zempoNumber
+// (see the offline-resilience note below) rather than inventing a new
+// endpoint. QR/short-code scanning hardware is out of scope for this pass —
+// the `method` enum reserves the values, but only staff-assisted search
+// exists today.
+//
+// Same-name disambiguation: two athletes can share a name (even a full
+// name, in the same academy) — each result row shows an identifier
+// resolved by resolveAthleteIdentity (see lib/athleteIdentity.ts), plus the
+// division(s) the athlete is entered in for this event and their academy,
+// so the operator isn't guessing which "Alice" to check in.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
@@ -16,13 +23,32 @@ import { hasMinRole, type UserRole } from '@sensei-hub/shared'
 import { apiFetch, ApiError, getCurrentRole, isLoggedIn } from '../../../../lib/api'
 import { translateApiError } from '../../../../lib/labels'
 import { enqueueOfflineWrite } from '../../../../lib/offlineQueue'
+import { resolveAthleteIdentity } from '../../../../lib/athleteIdentity'
 
 interface AthleteListItem {
   id: string
   fullName: string
   preferredName?: string
+  clubName?: string
   cpf?: string
-  enrollmentNumber?: string
+  federationNumber?: string
+  zempoNumber?: string
+  birthDate: string
+}
+
+interface DivisionListItem {
+  id: string
+  name: string
+}
+
+// Minimal slice of EventEntry — just enough to label which categories this
+// athlete is entered in at this event. withdrawn entries are excluded: an
+// operator at the door doesn't need to see a category the athlete pulled
+// out of.
+interface EntryListItem {
+  athleteId: string
+  divisionId: string
+  status: string
 }
 
 interface AttendanceDTO {
@@ -45,6 +71,8 @@ export default function EventCheckInPage() {
 
   const [query, setQuery] = useState('')
   const [allAthletes, setAllAthletes] = useState<AthleteListItem[]>([])
+  const [divisionsById, setDivisionsById] = useState<Map<string, DivisionListItem>>(new Map())
+  const [entriesByAthleteId, setEntriesByAthleteId] = useState<Map<string, EntryListItem[]>>(new Map())
   const [results, setResults] = useState<AthleteListItem[]>([])
   const [error, setError] = useState<string | null>(null)
   const [confirming, setConfirming] = useState<AthleteListItem | null>(null)
@@ -62,13 +90,29 @@ export default function EventCheckInPage() {
   // online) primes the service worker's read cache (src/app/sw.ts) for the
   // whole list, and everything after that is a local, instant, offline-safe
   // filter — the CLAUDE.md "fast search" UI principle plus real offline use.
+  // Divisions/entries are fetched the same way (also cached — see
+  // src/app/sw.ts's read-cache regex, which already covers
+  // /api/events/:id/{divisions,entries}) purely to label each result with
+  // its category — nothing here asks the server for anything beyond what
+  // /athletes was already returning for this same screen.
   const loadRecent = useCallback(async () => {
     try {
-      const [attendance, athletesData] = await Promise.all([
+      const [attendance, athletesData, divisions, entries] = await Promise.all([
         apiFetch<AttendanceDTO[]>(`/events/${eventId}/checkin?status=active`),
         apiFetch<{ items: AthleteListItem[] }>('/athletes?pageSize=500'),
+        apiFetch<DivisionListItem[]>(`/events/${eventId}/divisions`),
+        apiFetch<EntryListItem[]>(`/events/${eventId}/entries`),
       ])
       setAllAthletes(athletesData.items)
+      setDivisionsById(new Map(divisions.map((d) => [d.id, d])))
+      const byAthlete = new Map<string, EntryListItem[]>()
+      for (const entry of entries) {
+        if (entry.status === 'withdrawn') continue
+        const list = byAthlete.get(entry.athleteId) ?? []
+        list.push(entry)
+        byAthlete.set(entry.athleteId, list)
+      }
+      setEntriesByAthleteId(byAthlete)
       const athleteById = new Map(athletesData.items.map((a) => [a.id, a]))
       const withNames = attendance
         .slice(0, 8)
@@ -109,11 +153,30 @@ export default function EventCheckInPage() {
             .toLowerCase()
             .normalize('NFD')
             .replace(/[̀-ͯ]/g, '')
-          return name.includes(normalized) || a.cpf === term || a.enrollmentNumber === term
+          return (
+            name.includes(normalized) ||
+            a.cpf === term ||
+            a.federationNumber === term ||
+            a.zempoNumber === term
+          )
         })
         .slice(0, 20),
     )
   }, [query, allAthletes])
+
+  // Names in this event are common enough that two athletes can share one
+  // (see CLAUDE.md context: "duas Alices" from the same academy) — the
+  // identifier + category + academy below are what actually tells the
+  // operator apart which row to tap.
+  const categoryLabelFor = useCallback(
+    (athleteId: string): string | null => {
+      const entries = entriesByAthleteId.get(athleteId)
+      if (!entries || entries.length === 0) return null
+      const names = entries.map((e) => divisionsById.get(e.divisionId)?.name).filter((n): n is string => Boolean(n))
+      return names.length > 0 ? names.join(' · ') : null
+    },
+    [entriesByAthleteId, divisionsById],
+  )
 
   async function handleConfirmCheckIn(athlete: AthleteListItem) {
     setError(null)
@@ -227,7 +290,7 @@ export default function EventCheckInPage() {
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Buscar por nome, CPF ou matrícula…"
+            placeholder="Buscar por nome, CPF ou número de federação…"
             autoComplete="off"
             className="w-full rounded-xl border border-slate-700 bg-slate-900 px-5 py-4 text-lg text-white placeholder-slate-500 focus:border-blue-600 focus:outline-none"
           />
@@ -240,16 +303,21 @@ export default function EventCheckInPage() {
         )}
 
         <div className="space-y-2">
-          {results.map((athlete) => (
+          {results.map((athlete) => {
+            const identity = resolveAthleteIdentity(athlete)
+            const category = categoryLabelFor(athlete.id)
+            return (
             <div key={athlete.id} className="rounded-xl border border-slate-800 bg-slate-900 p-4">
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <p className="truncate text-lg font-semibold text-white">
                     {athlete.preferredName || athlete.fullName}
                   </p>
-                  {athlete.enrollmentNumber && (
-                    <p className="text-xs text-slate-500">Matrícula {athlete.enrollmentNumber}</p>
-                  )}
+                  <p className="truncate text-xs text-slate-400">
+                    {identity.label}
+                    {athlete.clubName && <> · {athlete.clubName}</>}
+                  </p>
+                  <p className="truncate text-xs text-slate-600">{category ?? 'Sem inscrição em divisão'}</p>
                 </div>
                 {confirming?.id === athlete.id ? (
                   <div className="flex shrink-0 gap-2">
@@ -279,7 +347,8 @@ export default function EventCheckInPage() {
                 )}
               </div>
             </div>
-          ))}
+            )
+          })}
         </div>
 
         {recent.length > 0 && query.trim().length < 2 && (

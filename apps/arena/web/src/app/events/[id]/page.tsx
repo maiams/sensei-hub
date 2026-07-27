@@ -15,6 +15,7 @@ import {
   translateApiError,
 } from '../../../lib/labels'
 import { DivisionsPanel } from './_components/DivisionsPanel'
+import { MoveEntryDialog, EntryMoveButton, useEntryContextMenu, type MoveEntryTarget } from './_components/MoveEntryDialog'
 
 interface EventDTO {
   id: string
@@ -894,6 +895,11 @@ interface EntryDTO {
   confirmedWeightKg?: number
   withdrawnReason?: string
   disqualifiedReason?: string
+  // Resolved server-side (federationNumber → zempoNumber → masked CPF → birth
+  // year) — see @arena/shared/athleteIdentity.ts. Shown next to the athlete's
+  // name so the manager can tell apart two entries with the same/similar name,
+  // same reason the check-in screen already shows it.
+  athleteIdentity?: string
 }
 
 interface AthleteListItem {
@@ -938,6 +944,7 @@ function EntriesSection({
   const [athletes, setAthletes] = useState<Record<string, AthleteListItem>>({})
   const [error, setError] = useState<string | null>(null)
   const [showRegisterForm, setShowRegisterForm] = useState(false)
+  const [moveTarget, setMoveTarget] = useState<MoveEntryTarget | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -1031,9 +1038,23 @@ function EntriesSection({
               canOperate={canOperate}
               canWeighIn={canWeighIn}
               onChanged={load}
+              onRequestMove={setMoveTarget}
             />
           ))}
         </ul>
+      )}
+
+      {moveTarget && (
+        <MoveEntryDialog
+          eventId={eventId}
+          entry={moveTarget}
+          divisions={divisions}
+          onClose={() => setMoveTarget(null)}
+          onMoved={() => {
+            setMoveTarget(null)
+            void load()
+          }}
+        />
       )}
     </section>
   )
@@ -1199,6 +1220,7 @@ function EntryRow({
   canOperate,
   canWeighIn,
   onChanged,
+  onRequestMove,
 }: {
   eventId: string
   entry: EntryDTO
@@ -1209,6 +1231,7 @@ function EntryRow({
   canOperate: boolean
   canWeighIn: boolean
   onChanged: () => void
+  onRequestMove: (target: MoveEntryTarget) => void
 }) {
   const [confirmDivisionId, setConfirmDivisionId] = useState(entry.divisionId)
   const [withdrawReason, setWithdrawReason] = useState('')
@@ -1241,6 +1264,15 @@ function EntryRow({
       }),
     ).then(() => setShowConfirm(false))
 
+  function openMove() {
+    onRequestMove({
+      id: entry.id,
+      athleteName,
+      currentDivisionId: entry.confirmedDivisionId ?? entry.divisionId,
+    })
+  }
+  const { onContextMenu, menu } = useEntryContextMenu(openMove)
+
   const handleWithdraw = () =>
     run(() =>
       apiFetch(`/events/${eventId}/entries/${entry.id}/withdraw`, {
@@ -1250,14 +1282,26 @@ function EntryRow({
     ).then(() => setShowWithdraw(false))
 
   return (
-    <li className="rounded-lg border border-slate-800 bg-slate-900 p-4">
+    <>
+      <li
+        className="rounded-lg border border-slate-800 bg-slate-900 p-4"
+        onContextMenu={canManage ? onContextMenu : undefined}
+      >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <p className="font-medium text-white">{athleteName}</p>
+          <p className="font-medium text-white">
+            {athleteName}
+            {entry.athleteIdentity && (
+              <span className="ml-2 text-xs font-normal text-slate-500">{entry.athleteIdentity}</span>
+            )}
+          </p>
           <p className="text-sm text-slate-500">{divisionName}</p>
         </div>
-        <span className="rounded-full border border-slate-700 px-3 py-1 text-xs font-medium text-slate-300">
-          {EVENT_ENTRY_STATUS_LABELS[entry.status] ?? entry.status}
+        <span className="flex items-center gap-2">
+          <span className="rounded-full border border-slate-700 px-3 py-1 text-xs font-medium text-slate-300">
+            {EVENT_ENTRY_STATUS_LABELS[entry.status] ?? entry.status}
+          </span>
+          {canManage && <EntryMoveButton onOpenDialog={openMove} title="Mover para outra categoria" />}
         </span>
       </div>
 
@@ -1369,5 +1413,7 @@ function EntryRow({
         )}
       </div>
     </li>
+      {canManage && menu}
+    </>
   )
 }

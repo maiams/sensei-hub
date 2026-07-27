@@ -35,6 +35,12 @@ interface SideDTO {
   athleteId: string
   displayName: string
   clubName: string | null
+  // Short label ("Federação 12345", "CPF ***.***.***-01", "nasc. 2012")
+  // resolved server-side — see resolveAthleteIdentity in @arena/shared — to
+  // tell apart two competitors with the same/similar name. Always null on
+  // the PUBLIC payload (ScoreboardService#toDTO) — this display page must
+  // never render it: it's for the mesário, not the public screen.
+  identity: string | null
   ippon: number
   wazaari: number
   yuko: number
@@ -326,8 +332,12 @@ export function ScoreboardPanel({
               }`}
             >
               <p className="truncate text-lg font-bold">{side.displayName}</p>
-              {side.clubName && (
-                <p className={`truncate text-xs ${isWhite ? 'text-slate-600' : 'text-blue-300'}`}>{side.clubName}</p>
+              {(side.clubName || side.identity) && (
+                <p className={`truncate text-xs ${isWhite ? 'text-slate-600' : 'text-blue-300'}`}>
+                  {side.clubName}
+                  {side.clubName && side.identity && ' · '}
+                  {side.identity}
+                </p>
               )}
 
               <div className="mt-2 flex items-end gap-4 font-mono text-3xl font-bold tabular-nums">

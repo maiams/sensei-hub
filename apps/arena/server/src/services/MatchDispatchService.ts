@@ -6,6 +6,7 @@ import { EventModel } from '../repositories/EventModel.js'
 import { AthleteModel } from '../repositories/AthleteModel.js'
 import { DivisionModel } from '../repositories/DivisionModel.js'
 import { AuditLogModel } from '@sensei-hub/core-server'
+import { resolveAthleteIdentity } from '@arena/shared'
 import type { EventCtx } from './EventService.js'
 
 export interface DispatchCandidate {
@@ -147,8 +148,10 @@ export class MatchDispatchService {
             athleteBId,
             athleteADisplayName: names.athleteA?.displayName ?? null,
             athleteAClubName: names.athleteA?.clubName ?? null,
+            athleteAIdentity: names.athleteA?.identity ?? null,
             athleteBDisplayName: names.athleteB?.displayName ?? null,
             athleteBClubName: names.athleteB?.clubName ?? null,
+            athleteBIdentity: names.athleteB?.identity ?? null,
           },
         }
       }
@@ -252,7 +255,10 @@ export class MatchDispatchService {
   // Looks up exactly the two athletes + one division a dispatched match
   // needs for display — never the full registry — so scoreboard_operator
   // routes can stay authorized without also granting /athletes or
-  // /events/:id/divisions/list-scale access.
+  // /events/:id/divisions/list-scale access. `identity` is resolved here
+  // (resolveAthleteIdentity) rather than sending federationNumber/
+  // zempoNumber/cpf/birthDate to the client — same minimization as the rest
+  // of this payload.
   async #namesFor(divisionId: string, athleteAId: string, athleteBId: string) {
     const [division, athleteA, athleteB] = await Promise.all([
       DivisionModel.findById(divisionId),
@@ -262,10 +268,18 @@ export class MatchDispatchService {
     return {
       divisionName: division?.name ?? null,
       athleteA: athleteA
-        ? { displayName: athleteA.preferredName || athleteA.fullName, clubName: athleteA.clubName ?? null }
+        ? {
+            displayName: athleteA.preferredName || athleteA.fullName,
+            clubName: athleteA.clubName ?? null,
+            identity: resolveAthleteIdentity(athleteA).label,
+          }
         : null,
       athleteB: athleteB
-        ? { displayName: athleteB.preferredName || athleteB.fullName, clubName: athleteB.clubName ?? null }
+        ? {
+            displayName: athleteB.preferredName || athleteB.fullName,
+            clubName: athleteB.clubName ?? null,
+            identity: resolveAthleteIdentity(athleteB).label,
+          }
         : null,
     }
   }

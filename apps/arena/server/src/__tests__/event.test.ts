@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest'
 import { connectTestDb, closeTestDb, clearTestDb } from '@sensei-hub/core-server/testing'
+import { AuditLogModel } from '@sensei-hub/core-server'
 import { buildApp } from '../app.js'
 import type { FastifyInstance } from 'fastify'
 
@@ -656,6 +657,395 @@ describe('Event entries', () => {
   })
 })
 
+// ─── Move entry to another division (EventEntryService.moveEntry) ────────
+// Dedicated operation, not an extension of /confirm: it must work from any
+// non-terminal status (including "confirmed", which /confirm can never
+// re-enter), never changes `status` itself, and archives any bracket the
+// move invalidates.
+
+describe('PATCH /api/events/:id/entries/:eid/move', () => {
+  it('moves a "registered" entry, leaving status untouched', async () => {
+    const token = await setupAdmin()
+    const event = await createEvent(token)
+    const divisionA = await createDivision(token, event.id, { name: 'Origem', weightLimitKg: 90 })
+    const divisionB = await createDivision(token, event.id, { name: 'Destino', weightLimitKg: 100 })
+    const athlete = await createAthlete(token)
+    const entry = (
+      await app.inject({
+        method: 'POST',
+        url: `/api/events/${event.id}/entries`,
+        headers: { authorization: `Bearer ${token}` },
+        payload: { divisionId: divisionA.id, athleteId: athlete.id },
+      })
+    ).json<EntryDTO>()
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/api/events/${event.id}/entries/${entry.id}/move`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { targetDivisionId: divisionB.id },
+    })
+    expect(res.statusCode).toBe(200)
+    const body = res.json<EntryDTO>()
+    expect(body.status).toBe('registered')
+    expect(body.confirmedDivisionId).toBe(divisionB.id)
+    expect(body.divisionId).toBe(divisionA.id) // original divisionId is left as history
+  })
+
+  it('moves a "checked_in" entry', async () => {
+    const token = await setupAdmin()
+    const event = await createEvent(token)
+    const divisionA = await createDivision(token, event.id, { name: 'Origem', weightLimitKg: 90 })
+    const divisionB = await createDivision(token, event.id, { name: 'Destino', weightLimitKg: 100 })
+    const athlete = await createAthlete(token)
+    const entry = (
+      await app.inject({
+        method: 'POST',
+        url: `/api/events/${event.id}/entries`,
+        headers: { authorization: `Bearer ${token}` },
+        payload: { divisionId: divisionA.id, athleteId: athlete.id },
+      })
+    ).json<EntryDTO>()
+    await app.inject({
+      method: 'PATCH',
+      url: `/api/events/${event.id}/entries/${entry.id}/checkin`,
+      headers: { authorization: `Bearer ${token}` },
+    })
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/api/events/${event.id}/entries/${entry.id}/move`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { targetDivisionId: divisionB.id },
+    })
+    expect(res.statusCode).toBe(200)
+    const body = res.json<EntryDTO>()
+    expect(body.status).toBe('checked_in')
+    expect(body.confirmedDivisionId).toBe(divisionB.id)
+  })
+
+  it('moves a "weighed_in" entry', async () => {
+    const token = await setupAdmin()
+    const event = await createEvent(token)
+    const divisionA = await createDivision(token, event.id, { name: 'Origem', weightLimitKg: 90 })
+    const divisionB = await createDivision(token, event.id, { name: 'Destino', weightLimitKg: 100 })
+    const athlete = await createAthlete(token)
+    const entry = (
+      await app.inject({
+        method: 'POST',
+        url: `/api/events/${event.id}/entries`,
+        headers: { authorization: `Bearer ${token}` },
+        payload: { divisionId: divisionA.id, athleteId: athlete.id },
+      })
+    ).json<EntryDTO>()
+    await app.inject({
+      method: 'PATCH',
+      url: `/api/events/${event.id}/entries/${entry.id}/checkin`,
+      headers: { authorization: `Bearer ${token}` },
+    })
+    await app.inject({
+      method: 'PATCH',
+      url: `/api/events/${event.id}/entries/${entry.id}/weighin`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { weightKg: 85 },
+    })
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/api/events/${event.id}/entries/${entry.id}/move`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { targetDivisionId: divisionB.id },
+    })
+    expect(res.statusCode).toBe(200)
+    const body = res.json<EntryDTO>()
+    expect(body.status).toBe('weighed_in')
+    expect(body.confirmedDivisionId).toBe(divisionB.id)
+  })
+
+  it('moves a "confirmed" entry — the case /confirm can no longer reach once locked in', async () => {
+    const token = await setupAdmin()
+    const event = await createEvent(token)
+    const divisionA = await createDivision(token, event.id, { name: 'Origem', weightLimitKg: 90 })
+    const divisionB = await createDivision(token, event.id, { name: 'Destino', weightLimitKg: 100 })
+    const athlete = await createAthlete(token)
+    const entry = (
+      await app.inject({
+        method: 'POST',
+        url: `/api/events/${event.id}/entries`,
+        headers: { authorization: `Bearer ${token}` },
+        payload: { divisionId: divisionA.id, athleteId: athlete.id },
+      })
+    ).json<EntryDTO>()
+    await app.inject({
+      method: 'PATCH',
+      url: `/api/events/${event.id}/entries/${entry.id}/checkin`,
+      headers: { authorization: `Bearer ${token}` },
+    })
+    await app.inject({
+      method: 'PATCH',
+      url: `/api/events/${event.id}/entries/${entry.id}/weighin`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { weightKg: 85 },
+    })
+    await app.inject({
+      method: 'PATCH',
+      url: `/api/events/${event.id}/entries/${entry.id}/confirm`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: {},
+    })
+
+    // Before this feature, the only way out of "confirmed" was to withdraw
+    // and re-register; move must work here directly, without touching status.
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/api/events/${event.id}/entries/${entry.id}/move`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { targetDivisionId: divisionB.id },
+    })
+    expect(res.statusCode).toBe(200)
+    const body = res.json<EntryDTO>()
+    expect(body.status).toBe('confirmed')
+    expect(body.confirmedDivisionId).toBe(divisionB.id)
+  })
+
+  it('returns 409 for withdrawn or disqualified entries (terminal, same as every other transition)', async () => {
+    const token = await setupAdmin()
+    const event = await createEvent(token)
+    const divisionA = await createDivision(token, event.id, { name: 'Origem', weightLimitKg: 90 })
+    const divisionB = await createDivision(token, event.id, { name: 'Destino', weightLimitKg: 100 })
+
+    const withdrawnAthlete = await createAthlete(token, { fullName: 'Retirada' })
+    const withdrawnEntry = (
+      await app.inject({
+        method: 'POST',
+        url: `/api/events/${event.id}/entries`,
+        headers: { authorization: `Bearer ${token}` },
+        payload: { divisionId: divisionA.id, athleteId: withdrawnAthlete.id },
+      })
+    ).json<EntryDTO>()
+    await app.inject({
+      method: 'PATCH',
+      url: `/api/events/${event.id}/entries/${withdrawnEntry.id}/withdraw`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { reason: 'desistiu do evento' },
+    })
+    const withdrawnMove = await app.inject({
+      method: 'PATCH',
+      url: `/api/events/${event.id}/entries/${withdrawnEntry.id}/move`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { targetDivisionId: divisionB.id },
+    })
+    expect(withdrawnMove.statusCode).toBe(409)
+
+    const dqAthlete = await createAthlete(token, { fullName: 'Desclassificada' })
+    const dqEntry = (
+      await app.inject({
+        method: 'POST',
+        url: `/api/events/${event.id}/entries`,
+        headers: { authorization: `Bearer ${token}` },
+        payload: { divisionId: divisionA.id, athleteId: dqAthlete.id },
+      })
+    ).json<EntryDTO>()
+    await app.inject({
+      method: 'PATCH',
+      url: `/api/events/${event.id}/entries/${dqEntry.id}/checkin`,
+      headers: { authorization: `Bearer ${token}` },
+    })
+    await app.inject({
+      method: 'PATCH',
+      url: `/api/events/${event.id}/entries/${dqEntry.id}/weighin`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { weightKg: 95 }, // over the 90kg limit -> disqualified (default policy)
+    })
+    const dqMove = await app.inject({
+      method: 'PATCH',
+      url: `/api/events/${event.id}/entries/${dqEntry.id}/move`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { targetDivisionId: divisionB.id },
+    })
+    expect(dqMove.statusCode).toBe(409)
+  })
+
+  it('returns 409 moving into the entry\'s own current division or into a division where the athlete already has another active entry', async () => {
+    const token = await setupAdmin()
+    const event = await createEvent(token)
+    const divisionA = await createDivision(token, event.id, { name: 'A', weightLimitKg: 90 })
+    const divisionB = await createDivision(token, event.id, { name: 'B', weightLimitKg: 100 })
+    const athlete = await createAthlete(token)
+    const entryA = (
+      await app.inject({
+        method: 'POST',
+        url: `/api/events/${event.id}/entries`,
+        headers: { authorization: `Bearer ${token}` },
+        payload: { divisionId: divisionA.id, athleteId: athlete.id },
+      })
+    ).json<EntryDTO>()
+
+    const sameDivision = await app.inject({
+      method: 'PATCH',
+      url: `/api/events/${event.id}/entries/${entryA.id}/move`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { targetDivisionId: divisionA.id },
+    })
+    expect(sameDivision.statusCode).toBe(409)
+
+    // Athlete also has a separate active entry directly in division B —
+    // moving entryA there too would leave two active entries in the same
+    // division for the same athlete.
+    await app.inject({
+      method: 'POST',
+      url: `/api/events/${event.id}/entries`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { divisionId: divisionB.id, athleteId: athlete.id },
+    })
+    const duplicate = await app.inject({
+      method: 'PATCH',
+      url: `/api/events/${event.id}/entries/${entryA.id}/move`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { targetDivisionId: divisionB.id },
+    })
+    expect(duplicate.statusCode).toBe(409)
+  })
+
+  it('requires a reason and archives the bracket (audited) when the move invalidates an existing bracket', async () => {
+    const token = await setupAdmin()
+    const event = await createEvent(token)
+    const divisionA = await createDivision(token, event.id, { name: 'Origem', weightLimitKg: 90 })
+    const divisionB = await createDivision(token, event.id, { name: 'Destino', weightLimitKg: 100 })
+
+    async function confirmedEntryIn(divisionId: string, fullName: string) {
+      const athlete = await createAthlete(token, { fullName })
+      const entry = (
+        await app.inject({
+          method: 'POST',
+          url: `/api/events/${event.id}/entries`,
+          headers: { authorization: `Bearer ${token}` },
+          payload: { divisionId, athleteId: athlete.id },
+        })
+      ).json<EntryDTO>()
+      await app.inject({
+        method: 'PATCH',
+        url: `/api/events/${event.id}/entries/${entry.id}/checkin`,
+        headers: { authorization: `Bearer ${token}` },
+      })
+      await app.inject({
+        method: 'PATCH',
+        url: `/api/events/${event.id}/entries/${entry.id}/weighin`,
+        headers: { authorization: `Bearer ${token}` },
+        payload: { weightKg: 80 },
+      })
+      await app.inject({
+        method: 'PATCH',
+        url: `/api/events/${event.id}/entries/${entry.id}/confirm`,
+        headers: { authorization: `Bearer ${token}` },
+        payload: {},
+      })
+      return entry
+    }
+
+    const entry1 = await confirmedEntryIn(divisionA.id, 'Confirmada Um')
+    await confirmedEntryIn(divisionA.id, 'Confirmada Dois')
+
+    const bracket = await app.inject({
+      method: 'POST',
+      url: `/api/events/${event.id}/divisions/${divisionA.id}/bracket`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { format: 'elimination' },
+    })
+    expect(bracket.statusCode).toBe(201)
+
+    // No reason -> 400, nothing is touched
+    const noReason = await app.inject({
+      method: 'PATCH',
+      url: `/api/events/${event.id}/entries/${entry1.id}/move`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { targetDivisionId: divisionB.id },
+    })
+    expect(noReason.statusCode).toBe(400)
+    const stillActive = await app.inject({
+      method: 'GET',
+      url: `/api/events/${event.id}/divisions/${divisionA.id}/bracket`,
+      headers: { authorization: `Bearer ${token}` },
+    })
+    expect(stillActive.statusCode).toBe(200)
+
+    // With a reason -> succeeds, and the origin division's bracket is archived
+    const withReason = await app.inject({
+      method: 'PATCH',
+      url: `/api/events/${event.id}/entries/${entry1.id}/move`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { targetDivisionId: divisionB.id, reason: 'atleta pediu para trocar de categoria' },
+    })
+    expect(withReason.statusCode).toBe(200)
+    expect(withReason.json<EntryDTO>().confirmedDivisionId).toBe(divisionB.id)
+
+    const archivedNow = await app.inject({
+      method: 'GET',
+      url: `/api/events/${event.id}/divisions/${divisionA.id}/bracket`,
+      headers: { authorization: `Bearer ${token}` },
+    })
+    expect(archivedNow.statusCode).toBe(404) // no more active bracket in the origin division
+
+    const bracketAudit = await AuditLogModel.findOne({
+      entityType: 'Bracket',
+      action: 'update',
+      fieldName: 'status',
+      newValue: 'archived',
+    }).sort({ timestamp: -1 })
+    expect(bracketAudit).not.toBeNull()
+    expect(bracketAudit?.reason).toContain('atleta pediu para trocar de categoria')
+
+    const entryAudit = await AuditLogModel.findOne({
+      entityType: 'EventEntry',
+      entityId: entry1.id,
+      fieldName: 'divisionId',
+    })
+    expect(entryAudit).not.toBeNull()
+    expect(entryAudit?.oldValue).toBe(divisionA.id)
+    expect(entryAudit?.newValue).toBe(divisionB.id)
+    expect(entryAudit?.reason).toBe('atleta pediu para trocar de categoria')
+  })
+
+  it('RBAC: only event_manager+ can move an entry — not staff, coach, or weigh_in_operator', async () => {
+    const adminToken = await setupAdmin()
+    const event = await createEvent(adminToken)
+    const divisionA = await createDivision(adminToken, event.id, { name: 'A' })
+    const divisionB = await createDivision(adminToken, event.id, { name: 'B' })
+    const athlete = await createAthlete(adminToken)
+    const entry = (
+      await app.inject({
+        method: 'POST',
+        url: `/api/events/${event.id}/entries`,
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: { divisionId: divisionA.id, athleteId: athlete.id },
+      })
+    ).json<EntryDTO>()
+
+    for (const [role, email] of [
+      ['staff', 'move-staff@test.com'],
+      ['coach', 'move-coach@test.com'],
+      ['weigh_in_operator', 'move-weighin@test.com'],
+    ] as const) {
+      const token = await createUserAndLogin(adminToken, role, email)
+      const res = await app.inject({
+        method: 'PATCH',
+        url: `/api/events/${event.id}/entries/${entry.id}/move`,
+        headers: { authorization: `Bearer ${token}` },
+        payload: { targetDivisionId: divisionB.id },
+      })
+      expect(res.statusCode).toBe(403)
+    }
+
+    const allowed = await app.inject({
+      method: 'PATCH',
+      url: `/api/events/${event.id}/entries/${entry.id}/move`,
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { targetDivisionId: divisionB.id },
+    })
+    expect(allowed.statusCode).toBe(200)
+  })
+})
+
 // ─── scoreboard_operator: exactly the reads it needs to run its mat ───────
 
 describe('RBAC: scoreboard_operator can read event context, not the roster', () => {
@@ -791,13 +1181,39 @@ describe('RBAC: weigh_in_operator can run the weigh-in station end to end', () =
       headers: { authorization: `Bearer ${weighInToken}` },
     })
     expect(entriesRes.statusCode).toBe(200)
-    const entries = entriesRes.json<Array<EntryDTO & { athleteName?: string }>>()
+    const entries = entriesRes.json<Array<EntryDTO & { athleteName?: string; athleteIdentity?: string }>>()
     expect(entries).toHaveLength(1)
     expect(entries[0]?.athleteName).toBe('Ricardo Santos')
+    // No federationNumber/zempoNumber given — the identity cascade falls
+    // back to the masked CPF (this athlete's cpf was set above), never the
+    // raw number.
+    expect(entries[0]?.athleteIdentity).toBe('CPF ***.***.***-35')
     // The lean entry DTO never carries the athlete registry's sensitive fields
     expect(entries[0]).not.toHaveProperty('cpf')
     expect(entries[0]).not.toHaveProperty('phone')
     expect(entries[0]).not.toHaveProperty('guardianName')
+    expect(JSON.stringify(entries[0])).not.toContain('11144477735')
+  })
+
+  it("resolves the entry's athleteIdentity from federationNumber when present, still without leaking it raw alongside sensitive fields", async () => {
+    const adminToken = await setupAdmin()
+    const event = await createEvent(adminToken)
+    const division = await createDivision(adminToken, event.id)
+    const athlete = await createAthlete(adminToken, { federationNumber: 'FPJ-4321', cpf: '11144477735' })
+    await app.inject({
+      method: 'POST',
+      url: `/api/events/${event.id}/entries`,
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { divisionId: division.id, athleteId: athlete.id },
+    })
+
+    const entriesRes = await app.inject({
+      method: 'GET',
+      url: `/api/events/${event.id}/entries`,
+      headers: { authorization: `Bearer ${adminToken}` },
+    })
+    const entries = entriesRes.json<Array<EntryDTO & { athleteIdentity?: string }>>()
+    expect(entries[0]?.athleteIdentity).toBe('Federação FPJ-4321')
     expect(JSON.stringify(entries[0])).not.toContain('11144477735')
   })
 

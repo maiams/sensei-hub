@@ -11,6 +11,10 @@ export interface ScoreboardSideSub {
   fullName: string
   publicName: string // = fullName unless Event.publicHideNamesUnderAge applies
   clubName: string | null
+  // Resolved via resolveAthleteIdentity at scoreboard creation time (see
+  // ScoreboardService#newSide) — denormalized same as fullName/publicName,
+  // operator-only (ScoreboardService#toDTO nulls it out on the public DTO).
+  identity: string
   ippon: number
   wazaari: number
   yuko: number
@@ -52,6 +56,7 @@ const sideSchema = new Schema<ScoreboardSideSub>(
     fullName: { type: String, required: true },
     publicName: { type: String, required: true },
     clubName: { type: String, default: null },
+    identity: { type: String, required: true },
     ippon: { type: Number, required: true, default: 0 },
     wazaari: { type: Number, required: true, default: 0 },
     yuko: { type: Number, required: true, default: 0 },

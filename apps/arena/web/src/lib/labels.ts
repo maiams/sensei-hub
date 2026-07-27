@@ -74,6 +74,11 @@ const ARENA_API_ERROR_TRANSLATIONS: Record<string, string> = {
   'Entry not found': 'Inscrição não encontrada',
   'Cannot delete a division that has entries': 'Não é possível apagar uma divisão que já tem inscrições',
   'Athlete is already registered in this division': 'Esta atleta já está inscrita nesta divisão',
+  // Move entry to another division
+  'Entry is already in this division': 'Esta inscrição já está nesta divisão',
+  'Athlete already has an active entry in this division': 'Esta atleta já tem uma inscrição ativa nesta divisão',
+  'A reason (at least 3 characters) is required to move an entry when it invalidates an existing bracket':
+    'Informe o motivo (mínimo 3 caracteres) — esta movimentação vai invalidar uma chave já gerada',
   // Bracket / matches
   'No active bracket for this division': 'Nenhuma chave ativa para esta divisão',
   'A bracket already exists for this division — pass force to regenerate': 'Já existe uma chave ativa para esta divisão',
@@ -124,6 +129,12 @@ export const translateApiError = createApiErrorTranslator(ARENA_API_ERROR_TRANSL
     if (!m) return null
     const [, from, to] = m
     return `Não é possível mover a inscrição de "${EVENT_ENTRY_STATUS_LABELS[from!] ?? from}" para "${EVENT_ENTRY_STATUS_LABELS[to!] ?? to}"`
+  },
+  (message) => {
+    const m = message.match(/^Cannot move an entry with status "(.+)"$/)
+    if (!m) return null
+    const status = m[1]!
+    return `Não é possível mover uma inscrição com status "${EVENT_ENTRY_STATUS_LABELS[status] ?? status}"`
   },
   (message) => {
     const m = message.match(/^Athlete still resting for (\d+)s — retry with ignoreRest to override$/)

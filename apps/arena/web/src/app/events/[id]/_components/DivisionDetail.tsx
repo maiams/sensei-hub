@@ -1,22 +1,34 @@
 'use client'
 
 // Expanded detail for one division leaf: edit/delete (moved here from the old
-// flat DivisionRow), bracket generation/regeneration, and — when the
-// division has exactly one active entry and nobody to fight — a way for the
-// manager to resolve it (move to another division, per CLAUDE.md "Athlete
-// moved to another category" edge case).
+// flat DivisionRow), bracket generation/regeneration, and the roster of
+// entries currently in this division — draggable to another division leaf,
+// or moved via the row's ⋮ menu / right-click ("Alterar › Categoria"), see
+// MoveEntryDialog.tsx. A division with exactly one active entry is NOT an
+// error state: in judô, an athlete without an opponent wins the category —
+// that's the normal outcome, not something to fix. The one-liner below is
+// informational, not a warning, and the manager can move the athlete to
+// another category any time if they'd rather give her a real fight.
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { apiFetch, ApiError } from '../../../../lib/api'
-import { translateApiError } from '../../../../lib/labels'
+import { translateApiError, EVENT_ENTRY_STATUS_LABELS } from '../../../../lib/labels'
 import type { DivisionLite } from './divisionGrouping'
+import {
+  EntryMoveButton,
+  useEntryContextMenu,
+  ENTRY_DRAG_MIME,
+  type MoveEntryTarget,
+} from './MoveEntryDialog'
 
 export interface EntryLite {
   id: string
   divisionId: string
   confirmedDivisionId?: string
   status: string
+  athleteName?: string
+  athleteIdentity?: string
 }
 
 interface BracketDTO {
@@ -56,21 +68,19 @@ function formatDateTime(iso: string): string {
 export function DivisionDetail({
   eventId,
   division,
-  allDivisions,
   entries,
   canManage,
   onDivisionSaved,
   onDivisionDeleted,
-  onEntriesChanged,
+  onRequestMove,
 }: {
   eventId: string
   division: DivisionLite
-  allDivisions: DivisionLite[]
   entries: EntryLite[]
   canManage: boolean
   onDivisionSaved: () => void
   onDivisionDeleted: (id: string) => void
-  onEntriesChanged: () => void
+  onRequestMove: (entry: MoveEntryTarget, targetDivisionId?: string) => void
 }) {
   const [editing, setEditing] = useState(false)
 
@@ -129,18 +139,81 @@ export function DivisionDetail({
         </div>
       )}
 
-      {activeEntries.length === 1 && canManage && (
-        <SingletonResolver
-          eventId={eventId}
-          entry={activeEntries[0]!}
-          allDivisions={allDivisions}
-          currentDivisionId={division.id}
-          onResolved={onEntriesChanged}
-        />
+      {activeEntries.length === 1 && (
+        <p className="mt-3 rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-sm text-slate-400">
+          Só esta atleta na categoria — no judô, sem adversário é vitória (não é um problema a resolver). Se preferir
+          dar luta a ela, mova-a para outra categoria pelo menu abaixo.
+        </p>
+      )}
+
+      {activeEntries.length > 0 && (
+        <ul className="mt-3 space-y-1.5">
+          {activeEntries.map((e) => (
+            <DivisionEntryRow
+              key={e.id}
+              entry={e}
+              divisionId={division.id}
+              canManage={canManage}
+              onRequestMove={onRequestMove}
+            />
+          ))}
+        </ul>
       )}
 
       {canManage && <BracketPanel eventId={eventId} divisionId={division.id} confirmedCount={confirmedCount} totalCount={totalCount} />}
     </div>
+  )
+}
+
+// One athlete row inside a division's roster. Draggable to another division
+// leaf (drag-and-drop is a mouse-only shortcut per CLAUDE.md's touch
+// priority), with the ⋮ button as the always-visible primary path and a
+// right-click menu as the desktop equivalent — all three open the same
+// MoveEntryDialog. Only rendered inside the division-grouped view, which is
+// why the "move" affordances only appear here, not in the entry's own
+// division-agnostic actions (check-in/confirm/withdraw) in the flat
+// "Inscrições" list further down the page.
+function DivisionEntryRow({
+  entry,
+  divisionId,
+  canManage,
+  onRequestMove,
+}: {
+  entry: EntryLite
+  divisionId: string
+  canManage: boolean
+  onRequestMove: (entry: MoveEntryTarget, targetDivisionId?: string) => void
+}) {
+  const label = entry.athleteName ?? entry.id
+
+  function open() {
+    onRequestMove({ id: entry.id, athleteName: label, currentDivisionId: divisionId })
+  }
+
+  const { onContextMenu, menu } = useEntryContextMenu(open)
+
+  return (
+    <>
+      <li
+        draggable={canManage}
+        onDragStart={(e) => {
+          e.dataTransfer.setData(ENTRY_DRAG_MIME, entry.id)
+          e.dataTransfer.effectAllowed = 'move'
+        }}
+        onContextMenu={canManage ? onContextMenu : undefined}
+        className={`flex items-center justify-between gap-2 rounded-lg border border-slate-800 bg-slate-900 px-3 py-1.5 text-sm ${canManage ? 'cursor-grab active:cursor-grabbing' : ''}`}
+      >
+        <span className="text-slate-200">
+          {label}
+          {entry.athleteIdentity && <span className="ml-2 text-xs text-slate-500">{entry.athleteIdentity}</span>}
+        </span>
+        <span className="flex items-center gap-2">
+          <span className="text-xs text-slate-500">{EVENT_ENTRY_STATUS_LABELS[entry.status] ?? entry.status}</span>
+          {canManage && <EntryMoveButton onOpenDialog={open} />}
+        </span>
+      </li>
+      {canManage && menu}
+    </>
   )
 }
 
@@ -243,148 +316,6 @@ function EditDivisionForm({
           Cancelar
         </button>
       </div>
-    </div>
-  )
-}
-
-// The manager's decision point for a division that has exactly one athlete
-// and therefore no possible opponent. Moving the entry to another division
-// only works while the API allows it: EventEntryService's state machine
-// only permits the (weighed_in -> confirmed) transition that the /confirm
-// endpoint uses, so re-targeting confirmedDivisionId is only possible before
-// the entry has already been confirmed. Once confirmed, the only state-machine
-// legal move is to withdraw (with an audited reason) and re-register.
-function SingletonResolver({
-  eventId,
-  entry,
-  allDivisions,
-  currentDivisionId,
-  onResolved,
-}: {
-  eventId: string
-  entry: EntryLite
-  allDivisions: DivisionLite[]
-  currentDivisionId: string
-  onResolved: () => void
-}) {
-  const [targetId, setTargetId] = useState('')
-  const [showWithdraw, setShowWithdraw] = useState(false)
-  const [withdrawReason, setWithdrawReason] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  const otherDivisions = allDivisions.filter((d) => d.id !== currentDivisionId)
-
-  async function handleMove() {
-    if (!targetId) return
-    setLoading(true)
-    setError(null)
-    try {
-      await apiFetch(`/events/${eventId}/entries/${entry.id}/confirm`, {
-        method: 'PATCH',
-        body: JSON.stringify({ confirmedDivisionId: targetId }),
-      })
-      onResolved()
-    } catch (err) {
-      setError(err instanceof ApiError ? translateApiError(err.message) : 'Não foi possível mover a inscrição.')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  async function handleWithdraw() {
-    setLoading(true)
-    setError(null)
-    try {
-      await apiFetch(`/events/${eventId}/entries/${entry.id}/withdraw`, {
-        method: 'PATCH',
-        body: JSON.stringify({ reason: withdrawReason }),
-      })
-      onResolved()
-    } catch (err) {
-      setError(err instanceof ApiError ? translateApiError(err.message) : 'Não foi possível retirar a inscrição.')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  return (
-    <div className="mt-3 rounded-lg border border-amber-800 bg-amber-950/30 p-3">
-      <p className="text-sm font-medium text-amber-300">Só 1 atleta nesta divisão — sem adversário.</p>
-
-      {entry.status === 'weighed_in' && (
-        <div className="mt-2 flex flex-wrap items-center gap-2">
-          <select
-            value={targetId}
-            onChange={(e) => setTargetId(e.target.value)}
-            className="rounded-lg border border-amber-800 bg-slate-900 px-3 py-1.5 text-sm text-white"
-          >
-            <option value="">Mover para…</option>
-            {otherDivisions.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.name}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            onClick={handleMove}
-            disabled={!targetId || loading}
-            className="rounded-lg bg-amber-700 px-3 py-1.5 text-sm font-semibold text-white hover:bg-amber-600 disabled:opacity-60"
-          >
-            Mover e confirmar nesta divisão
-          </button>
-        </div>
-      )}
-
-      {entry.status === 'confirmed' && (
-        <>
-          <p className="mt-1 text-xs text-amber-400">
-            Esta inscrição já foi confirmada nesta divisão. O remanejamento direto só é possível antes da confirmação
-            (logo após a pesagem) — para mudar de categoria agora, retire a inscrição com um motivo e inscreva a
-            atleta novamente na divisão correta.
-          </p>
-          {!showWithdraw ? (
-            <button
-              type="button"
-              onClick={() => setShowWithdraw(true)}
-              className="mt-2 rounded-lg border border-red-900 px-3 py-1.5 text-xs text-red-400 hover:bg-red-950"
-            >
-              Retirar inscrição
-            </button>
-          ) : (
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <input
-                autoFocus
-                value={withdrawReason}
-                onChange={(e) => setWithdrawReason(e.target.value)}
-                placeholder="Motivo (ex: única inscrita na categoria)"
-                className="w-64 rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-sm text-white placeholder-slate-500"
-              />
-              <button
-                type="button"
-                onClick={handleWithdraw}
-                disabled={loading || withdrawReason.trim().length < 3}
-                className="rounded-lg bg-red-700 px-3 py-1.5 text-sm font-semibold text-white hover:bg-red-600 disabled:opacity-60"
-              >
-                Confirmar retirada
-              </button>
-              <button type="button" onClick={() => setShowWithdraw(false)} className="text-sm text-slate-400 hover:text-slate-200">
-                Cancelar
-              </button>
-            </div>
-          )}
-        </>
-      )}
-
-      {(entry.status === 'registered' || entry.status === 'checked_in') && (
-        <p className="mt-1 text-xs text-amber-400">
-          Esta atleta ainda não foi pesada. O remanejamento para outra divisão fica disponível assim que a pesagem for
-          feita, no passo de confirmação de categoria.
-        </p>
-      )}
-
-      {error && <p className="mt-2 text-xs text-red-400">{error}</p>}
     </div>
   )
 }

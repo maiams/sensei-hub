@@ -34,8 +34,13 @@ interface NextMatchDTO {
     athleteBId: string
     athleteADisplayName: string | null
     athleteAClubName: string | null
+    // Short label ("Federação 12345", "CPF ***.***.***-01", "nasc. 2012")
+    // resolved server-side — see resolveAthleteIdentity in @arena/shared —
+    // to tell apart two competitors with the same/similar name.
+    athleteAIdentity: string | null
     athleteBDisplayName: string | null
     athleteBClubName: string | null
+    athleteBIdentity: string | null
   } | null
 }
 
@@ -235,6 +240,12 @@ export default function OperateAreaPage() {
                     <span className="ml-1 text-sm font-normal text-slate-400">({nextMatch.athleteBClubName})</span>
                   )}
                 </p>
+                {(nextMatch.athleteAIdentity || nextMatch.athleteBIdentity) && (
+                  <p className="mt-0.5 text-xs text-slate-500">
+                    {nextMatch.athleteAIdentity ?? '—'} <span className="text-slate-600">vs</span>{' '}
+                    {nextMatch.athleteBIdentity ?? '—'}
+                  </p>
+                )}
                 <p className="mt-1 text-xs text-slate-500">Luta #{nextMatch.matchNumber}</p>
                 <button
                   type="button"

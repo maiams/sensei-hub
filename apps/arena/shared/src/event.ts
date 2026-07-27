@@ -146,6 +146,20 @@ export const WithdrawEntryInput = z.object({
 })
 export type WithdrawEntryInput = z.infer<typeof WithdrawEntryInput>
 
+// PATCH /api/events/:id/entries/:eid/move
+// Moves an entry to a different division regardless of its current status
+// (except the terminal withdrawn/disqualified) — the normal way to send an
+// athlete to a different category (drag-and-drop or the row menu on the
+// event page), independent of the confirm-category state machine. `reason`
+// is optional here but the server requires it (400 without one) whenever the
+// move would archive an existing bracket in the origin or destination
+// division — see EventEntryService.moveEntry.
+export const MoveEntryInput = z.object({
+  targetDivisionId: z.string(),
+  reason: z.string().min(3).max(500).optional(),
+})
+export type MoveEntryInput = z.infer<typeof MoveEntryInput>
+
 export const EventEntrySchema = z.object({
   _id: z.string(),
   eventId: z.string(),
@@ -156,6 +170,16 @@ export const EventEntrySchema = z.object({
   // roles like weigh_in_operator, who can read entries but not the athlete
   // registry, still get a display name. See EventEntryService#listEntries.
   athleteName: z.string().optional(),
+  // Resolved + already-masked server-side via resolveAthleteIdentity (see
+  // @arena/shared/athleteIdentity.ts) — a short label ("Federação 12345",
+  // "Reg. 998877", "CPF ***.***.***-01", "nasc. 2012") to tell apart two
+  // athletes with the same/similar name. Same minimization rule as
+  // athleteName: never the raw federationNumber/zempoNumber/cpf, just the
+  // resolved display label. CONTRACT: the event roster listing (event
+  // detail page) reads this field to show next to each entry's name — see
+  // apps/arena/web/src/lib/athleteIdentity.ts for the client-side sibling
+  // used where the full competitor record is already in hand.
+  athleteIdentity: z.string().optional(),
   academyId: z.string(),
   registrationMethod: RegistrationMethod,
   importJobId: z.string().optional(),

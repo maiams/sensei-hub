@@ -1,3 +1,4 @@
+import type { ClientSession } from 'mongoose'
 import { BracketModel, type BracketDocument } from '../repositories/BracketModel.js'
 import { MatchModel, type MatchDocument } from '../repositories/MatchModel.js'
 import { EventModel } from '../repositories/EventModel.js'
@@ -113,6 +114,54 @@ export class BracketService {
     })
 
     return this.#bracketToDTO(bracket)
+  }
+
+  // Read-only check used by EventEntryService before moving an entry, to
+  // decide whether the move is destructive (and therefore requires a
+  // reason) without archiving anything yet.
+  async hasActiveBracket(eventId: string, divisionId: string): Promise<boolean> {
+    const bracket = await BracketModel.findOne({ eventId, divisionId, status: 'active' }).select('_id')
+    return bracket !== null
+  }
+
+  // Called by EventEntryService when an entry is moved into or out of a
+  // division that already has an active bracket — the bracket's slot list
+  // (and any matches already fought) no longer reflects who is actually
+  // registered in the division, so it's archived rather than silently left
+  // pointing at a stale roster. Matches already recorded are NOT deleted —
+  // same "archive, never destroy" rule generateBracket's own force-regenerate
+  // path already follows (see above); the manager generates a fresh bracket
+  // for the division afterwards. Returns whether anything was archived, so
+  // the caller can tell whether the move actually touched a bracket.
+  async archiveActiveBracketForEntryMove(
+    eventId: string,
+    divisionId: string,
+    reason: string,
+    ctx: AuthCtx,
+    session?: ClientSession,
+  ): Promise<boolean> {
+    const bracket = await BracketModel.findOne({ eventId, divisionId, status: 'active' }).session(session ?? null)
+    if (!bracket) return false
+    bracket.status = 'archived'
+    await bracket.save(session ? { session } : undefined)
+    await AuditLogModel.create(
+      [
+        {
+          userId: ctx.userId,
+          entityType: 'Bracket',
+          entityId: bracket._id,
+          action: 'update',
+          fieldName: 'status',
+          oldValue: 'active',
+          newValue: 'archived',
+          reason,
+          sessionId: ctx.sessionId,
+          ip: ctx.ip,
+        },
+      ],
+      session ? { session } : undefined,
+    )
+    return true
   }
 
   async getBracket(eventId: string, academyId: string, divisionId: string) {
