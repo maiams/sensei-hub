@@ -33,6 +33,12 @@
       "target": "nsis",
       "extraResources": [{ "from": "../../../resources/mongodb/win-${arch}", "to": "mongodb", "filter": ["**/*"] }]
     },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": true,
+      "allowToChangeInstallationDirectory": false,
+      "include": "../../../installer/win/custom-dojo-standalone.nsh"
+    },
     "mac": {
       "target": "dmg",
       "extraResources": [{ "from": "../../../resources/mongodb/mac-${arch}", "to": "mongodb", "filter": ["**/*"] }]

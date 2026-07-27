@@ -1,4 +1,4 @@
-import { app, ipcMain, BrowserWindow, dialog } from 'electron'
+import { app, ipcMain, BrowserWindow, dialog, Menu } from 'electron'
 import * as path from 'path'
 import * as fs from 'fs'
 import { Supervisor } from './supervisor.js'
@@ -11,6 +11,7 @@ import {
   showLoadingOverlay,
   hideLoadingOverlay,
 } from './kiosk.js'
+import { resolveNetworkMode, resetNetworkMode } from './networkMode.js'
 
 export interface DesktopAppConfig {
   /** "Sensei Dojô" / "Sensei Arena" — shown in dialogs and the loading overlay. */
@@ -84,11 +85,37 @@ export function createDesktopApp(config: DesktopAppConfig): void {
     return dataDir
   }
 
-  const clusterEnabled = config.features.cluster && process.env.CLUSTER_ENABLED === 'true'
-
   let supervisor: Supervisor | null = null
 
   configureKiosk({ appOrigin: config.appOrigin, webPort: config.webPort, productName: config.productName })
+
+  // Only products that ship the Fase 7 cluster engine ask this (today:
+  // Arena — Dojô's features.cluster is false, so it's always standalone,
+  // no dialog, no menu item). CLUSTER_ENABLED=true stays as a dev/CI
+  // override so scripts/dev-run.mjs and automated packaging smoke tests
+  // don't have to click through a native dialog.
+  if (config.features.cluster) {
+    const template: Electron.MenuItemConstructorOptions[] = [
+      ...(process.platform === 'darwin' ? [{ role: 'appMenu' as const }] : []),
+      { role: 'editMenu' as const },
+      { role: 'viewMenu' as const },
+      { role: 'windowMenu' as const },
+      {
+        label: 'Rede',
+        submenu: [
+          {
+            label: 'Alterar modo de rede…',
+            click: () => {
+              resetNetworkMode()
+              app.relaunch()
+              app.exit()
+            },
+          },
+        ],
+      },
+    ]
+    Menu.setApplicationMenu(Menu.buildFromTemplate(template))
+  }
 
   // Scoreboard IPC only exists for the kiosk-enabled product (arena). The dojo
   // window is a plain management window with no fullscreen scoreboard screens.
@@ -110,6 +137,13 @@ export function createDesktopApp(config: DesktopAppConfig): void {
       ? createLauncherWindow(launcherUrl)
       : createLauncherWindow(launcherUrl, { width: 1200, height: 800 })
     showLoadingOverlay()
+
+    // CLUSTER_ENABLED=true is a dev/CI bypass (scripts/dev-run.mjs, packaging
+    // smoke tests) — anything else goes through the persisted, ask-once
+    // dialog. Dojô (features.cluster: false) never reaches either branch.
+    const clusterEnabled = config.features.cluster
+      ? process.env.CLUSTER_ENABLED === 'true' || resolveNetworkMode(config.productName) === 'cluster'
+      : false
 
     supervisor = new Supervisor(
       resolveMongoPath(),

@@ -31,7 +31,16 @@
     ],
     "win": {
       "target": "nsis",
-      "extraResources": [{ "from": "../../../resources/mongodb/win-${arch}", "to": "mongodb", "filter": ["**/*"] }]
+      "extraResources": [
+        { "from": "../../../resources/mongodb/win-${arch}", "to": "mongodb", "filter": ["**/*"] },
+        { "from": "../../dojo/desktop/release/win-unpacked", "to": "dojo-app", "filter": ["**/*"] }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": true,
+      "allowToChangeInstallationDirectory": false,
+      "include": "../../../installer/win/custom.nsh"
     },
     "mac": {
       "target": "dmg",

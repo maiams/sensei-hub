@@ -18,8 +18,10 @@
     "clean": "turbo run clean",
     "dev:dojo": "node scripts/dev-run.mjs dojo",
     "dev:arena": "node scripts/dev-run.mjs arena",
+    "dev:seed": "node scripts/dev-seed.mjs",
     "package:dojo": "node scripts/package-app.mjs dojo",
-    "package:arena": "node scripts/package-app.mjs arena"
+    "package:arena": "node scripts/package-app.mjs arena",
+    "package:installer:win": "node scripts/package-installer.mjs -- --x64"
   },
   "devDependencies": {
     "turbo": "^2.5.4",
