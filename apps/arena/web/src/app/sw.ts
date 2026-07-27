@@ -31,6 +31,11 @@ declare const self: ServiceWorkerGlobalScope
 
 const serwist = new Serwist({
   precacheEntries: self.__SW_MANIFEST,
+  // skipWaiting + clientsClaim: a new SW takes over immediately instead of
+  // waiting for every open tab to close. This alone isn't enough to avoid a
+  // stale/fossilized SW serving mismatched chunks — see the recovery layer
+  // in ../../components/ServiceWorkerRegister.tsx and
+  // docs/dev-service-worker-cache-recovery.md for the rest of the story.
   skipWaiting: true,
   clientsClaim: true,
   navigationPreload: true,
