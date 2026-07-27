@@ -1,19 +1,36 @@
 'use client'
 
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
-import { setTokens } from './api'
+import { getCurrentRole, setTokens } from './api'
 
 export interface LoginPageProps {
   productName: string
   subtitle: string
   afterLoginHref: string
+  // Optional per-role landing override (e.g. a scoreboard operator should
+  // land on the mat they run, not on a screen listing every event they
+  // can't open). Takes precedence over `afterLoginHref` when it returns a
+  // truthy path; falls back to `afterLoginHref` otherwise. `role` reads the
+  // just-issued JWT's claim, same trust level as `getCurrentRole()`
+  // elsewhere (display-only — the server re-checks on every request).
+  resolveAfterLoginHref?: (role: string | null) => string | null | undefined
 }
 
-export function LoginPage({ productName, subtitle, afterLoginHref }: LoginPageProps) {
+export function LoginPage({ productName, subtitle, afterLoginHref, resolveAfterLoginHref }: LoginPageProps) {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Only enable submit once React has hydrated and `handleSubmit` is really
+  // attached. Before that, a click would fall through to the browser's native
+  // submit — which, on a form with no action, is a GET to this same URL that
+  // puts e-mail and password in the query string and in the browser history.
+  // (Observed for real: a stale service worker served mismatched chunks, the
+  // page never hydrated, and "Entrar" silently did nothing — looking to the
+  // operator like a wrong password.) `method="post"` below is the second layer:
+  // if a native submit ever happens anyway, credentials go in the body.
+  const [hydrated, setHydrated] = useState(false)
+  useEffect(() => setHydrated(true), [])
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -40,7 +57,8 @@ export function LoginPage({ productName, subtitle, afterLoginHref }: LoginPagePr
 
       const body = (await res.json()) as { accessToken: string; refreshToken: string }
       setTokens(body.accessToken, body.refreshToken)
-      router.replace(afterLoginHref)
+      const target = resolveAfterLoginHref?.(getCurrentRole()) || afterLoginHref
+      router.replace(target)
     } catch {
       setError('Não foi possível conectar ao servidor. Tente novamente.')
     } finally {
@@ -54,7 +72,7 @@ export function LoginPage({ productName, subtitle, afterLoginHref }: LoginPagePr
         <h1 className="mb-2 text-3xl font-bold tracking-tight text-white">{productName}</h1>
         <p className="mb-8 text-slate-400">{subtitle}</p>
 
-        <form onSubmit={handleSubmit} className="space-y-5">
+        <form onSubmit={handleSubmit} method="post" className="space-y-5">
           <div>
             <label className="mb-1 block text-sm font-medium text-slate-300" htmlFor="email">
               E-mail
@@ -92,10 +110,10 @@ export function LoginPage({ productName, subtitle, afterLoginHref }: LoginPagePr
 
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || !hydrated}
             className="w-full rounded-lg bg-blue-600 px-4 py-3 font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {loading ? 'Entrando…' : 'Entrar'}
+            {loading ? 'Entrando…' : hydrated ? 'Entrar' : 'Carregando…'}
           </button>
         </form>
       </div>
