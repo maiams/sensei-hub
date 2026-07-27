@@ -5,7 +5,6 @@ import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { hasMinRole, type UserRole } from '@sensei-hub/shared'
 import { apiFetch, ApiError, getAccessToken, getCurrentRole, isLoggedIn } from '../../../lib/api'
-import { enqueueOfflineWrite } from '../../../lib/offlineQueue'
 import {
   EVENT_ENTRY_STATUS_LABELS,
   EVENT_STATUS_LABELS,
@@ -15,6 +14,7 @@ import {
   formatDate,
   translateApiError,
 } from '../../../lib/labels'
+import { DivisionsPanel } from './_components/DivisionsPanel'
 
 interface EventDTO {
   id: string
@@ -34,17 +34,7 @@ interface DivisionDTO {
   maxAge: number | null
   weightLimitKg: number | null
   sourceTemplateKey?: string
-}
-
-function ageRangeLabel(minAge: number | null, maxAge: number | null): string {
-  if (minAge === null && maxAge === null) return 'sem restrição de idade'
-  if (maxAge === null) return `${minAge}+ anos`
-  if (minAge === null) return `até ${maxAge} anos`
-  return `${minAge}–${maxAge} anos`
-}
-
-function weightLabel(weightLimitKg: number | null): string {
-  return weightLimitKg === null ? 'aberta' : `até ${weightLimitKg}kg`
+  sourceGroupId?: string
 }
 
 export default function EventDetailPage() {
@@ -117,7 +107,14 @@ export default function EventDetailPage() {
 
         <EventHeader event={event} canManage={canManage} onChanged={load} />
 
-        <DivisionsSection eventId={eventId} divisions={divisions} canManage={canManage} onChanged={load} />
+        <DivisionsPanel
+          eventId={eventId}
+          divisions={divisions}
+          canManage={canManage}
+          onChanged={load}
+          entriesRefreshKey={entriesRefreshKey}
+          onEntriesChanged={() => setEntriesRefreshKey((k) => k + 1)}
+        />
 
         <AreasSection
           eventId={eventId}
@@ -283,343 +280,6 @@ function EventHeader({ event, canManage, onChanged }: { event: EventDTO; canMana
         Salvar
       </button>
     </section>
-  )
-}
-
-function DivisionsSection({
-  eventId,
-  divisions,
-  canManage,
-  onChanged,
-}: {
-  eventId: string
-  divisions: DivisionDTO[]
-  canManage: boolean
-  onChanged: () => void
-}) {
-  const [error, setError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [addingDivision, setAddingDivision] = useState(false)
-
-  async function handleImport() {
-    setLoading(true)
-    setError(null)
-    try {
-      await apiFetch(`/events/${eventId}/divisions/import-from-templates`, { method: 'POST', body: JSON.stringify({}) })
-      onChanged()
-    } catch (err) {
-      setError(err instanceof ApiError ? translateApiError(err.message) : 'Não foi possível importar.')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  async function handleDelete(divisionId: string, name: string) {
-    if (!window.confirm(`Apagar a divisão "${name}"?`)) return
-    setError(null)
-    try {
-      await apiFetch(`/events/${eventId}/divisions/${divisionId}`, { method: 'DELETE' })
-      onChanged()
-    } catch (err) {
-      setError(err instanceof ApiError ? translateApiError(err.message) : 'Não foi possível apagar.')
-    }
-  }
-
-  return (
-    <section>
-      <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-white">Divisões</h2>
-        <div className="flex gap-2">
-          <Link
-            href={`/events/${eventId}/print/weighin`}
-            className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-300 hover:bg-slate-800"
-          >
-            Ficha de pesagem
-          </Link>
-        {canManage && (
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={handleImport}
-              disabled={loading}
-              className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-300 hover:bg-slate-800 disabled:opacity-60"
-            >
-              Importar do padrão da academia
-            </button>
-            <button
-              type="button"
-              onClick={() => setAddingDivision(true)}
-              className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-blue-500"
-            >
-              + Criar divisão
-            </button>
-          </div>
-        )}
-        </div>
-      </div>
-
-      {error && <p className="mb-3 text-sm text-red-400">{error}</p>}
-
-      {divisions.length === 0 && !addingDivision && (
-        <p className="text-sm text-slate-500">
-          Nenhuma divisão ainda. Importe do padrão da academia ou crie manualmente.
-        </p>
-      )}
-
-      <div className="space-y-2">
-        {divisions.map((d) => (
-          <DivisionRow key={d.id} eventId={eventId} division={d} canManage={canManage} onChanged={onChanged} onDelete={handleDelete} />
-        ))}
-      </div>
-
-      {canManage && addingDivision && (
-        <NewDivisionForm eventId={eventId} onDone={() => setAddingDivision(false)} onCreated={onChanged} />
-      )}
-    </section>
-  )
-}
-
-function DivisionRow({
-  eventId,
-  division,
-  canManage,
-  onChanged,
-  onDelete,
-}: {
-  eventId: string
-  division: DivisionDTO
-  canManage: boolean
-  onChanged: () => void
-  onDelete: (id: string, name: string) => void
-}) {
-  const [editing, setEditing] = useState(false)
-  const [name, setName] = useState(division.name)
-  const [minAge, setMinAge] = useState(division.minAge?.toString() ?? '')
-  const [maxAge, setMaxAge] = useState(division.maxAge?.toString() ?? '')
-  const [weightLimitKg, setWeightLimitKg] = useState(division.weightLimitKg?.toString() ?? '')
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  async function handleSave() {
-    setLoading(true)
-    setError(null)
-    try {
-      await apiFetch(`/events/${eventId}/divisions/${division.id}`, {
-        method: 'PATCH',
-        body: JSON.stringify({
-          name,
-          minAge: minAge.trim() === '' ? null : Number(minAge),
-          maxAge: maxAge.trim() === '' ? null : Number(maxAge),
-          weightLimitKg: weightLimitKg.trim() === '' ? null : Number(weightLimitKg),
-        }),
-      })
-      setEditing(false)
-      onChanged()
-    } catch (err) {
-      setError(err instanceof ApiError ? translateApiError(err.message) : 'Não foi possível salvar.')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  if (!editing) {
-    return (
-      <div className="flex items-center justify-between rounded-lg border border-slate-800 bg-slate-900 px-4 py-3">
-        <div>
-          <p className="font-medium text-white">{division.name}</p>
-          <p className="text-sm text-slate-500">
-            {ageRangeLabel(division.minAge, division.maxAge)} · {weightLabel(division.weightLimitKg)}
-            {division.sourceTemplateKey ? ' · do padrão' : ''}
-            {' · '}
-            <Link href={`/events/${eventId}/print/bracket/${division.id}`} className="underline decoration-dotted hover:text-slate-300">
-              chave
-            </Link>
-            {' · '}
-            <Link href={`/events/${eventId}/print/results/${division.id}`} className="underline decoration-dotted hover:text-slate-300">
-              resultado
-            </Link>
-          </p>
-        </div>
-        {canManage && (
-          <div className="flex shrink-0 gap-2">
-            <button
-              type="button"
-              onClick={() => setEditing(true)}
-              className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800"
-            >
-              Editar
-            </button>
-            <button
-              type="button"
-              onClick={() => onDelete(division.id, division.name)}
-              className="rounded-lg border border-red-900 px-3 py-1.5 text-sm text-red-400 hover:bg-red-950"
-            >
-              Apagar
-            </button>
-          </div>
-        )}
-      </div>
-    )
-  }
-
-  return (
-    <div className="rounded-lg border border-slate-800 bg-slate-900 p-4">
-      <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <div className="col-span-2">
-          <label className="mb-1 block text-xs text-slate-500">Nome</label>
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
-          />
-        </div>
-        <div>
-          <label className="mb-1 block text-xs text-slate-500">Idade mín.</label>
-          <input
-            type="number"
-            value={minAge}
-            onChange={(e) => setMinAge(e.target.value)}
-            placeholder="—"
-            className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-500"
-          />
-        </div>
-        <div>
-          <label className="mb-1 block text-xs text-slate-500">Idade máx.</label>
-          <input
-            type="number"
-            value={maxAge}
-            onChange={(e) => setMaxAge(e.target.value)}
-            placeholder="sem limite"
-            className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-500"
-          />
-        </div>
-        <div className="col-span-2 sm:col-span-1">
-          <label className="mb-1 block text-xs text-slate-500">Peso limite (kg)</label>
-          <input
-            type="number"
-            value={weightLimitKg}
-            onChange={(e) => setWeightLimitKg(e.target.value)}
-            placeholder="aberta"
-            className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-500"
-          />
-        </div>
-      </div>
-      {error && <p className="mb-2 text-sm text-red-400">{error}</p>}
-      <div className="flex gap-2">
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={loading}
-          className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:opacity-60"
-        >
-          Salvar
-        </button>
-        <button
-          type="button"
-          onClick={() => setEditing(false)}
-          className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800"
-        >
-          Cancelar
-        </button>
-      </div>
-    </div>
-  )
-}
-
-function NewDivisionForm({ eventId, onDone, onCreated }: { eventId: string; onDone: () => void; onCreated: () => void }) {
-  const [name, setName] = useState('')
-  const [minAge, setMinAge] = useState('')
-  const [maxAge, setMaxAge] = useState('')
-  const [weightLimitKg, setWeightLimitKg] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault()
-    setLoading(true)
-    setError(null)
-    try {
-      await apiFetch(`/events/${eventId}/divisions`, {
-        method: 'POST',
-        body: JSON.stringify({
-          name,
-          minAge: minAge.trim() === '' ? undefined : Number(minAge),
-          maxAge: maxAge.trim() === '' ? undefined : Number(maxAge),
-          weightLimitKg: weightLimitKg.trim() === '' ? undefined : Number(weightLimitKg),
-        }),
-      })
-      onCreated()
-      onDone()
-    } catch (err) {
-      setError(err instanceof ApiError ? translateApiError(err.message) : 'Não foi possível criar.')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  return (
-    <form onSubmit={handleSubmit} className="mt-3 rounded-lg border border-slate-800 bg-slate-900 p-4">
-      <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <div className="col-span-2">
-          <label className="mb-1 block text-xs text-slate-500">Nome</label>
-          <input
-            required
-            autoFocus
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Ex: Adulto Masculino -90kg"
-            className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-500"
-          />
-        </div>
-        <div>
-          <label className="mb-1 block text-xs text-slate-500">Idade mín.</label>
-          <input
-            type="number"
-            value={minAge}
-            onChange={(e) => setMinAge(e.target.value)}
-            placeholder="—"
-            className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-500"
-          />
-        </div>
-        <div>
-          <label className="mb-1 block text-xs text-slate-500">Idade máx.</label>
-          <input
-            type="number"
-            value={maxAge}
-            onChange={(e) => setMaxAge(e.target.value)}
-            placeholder="sem limite"
-            className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-500"
-          />
-        </div>
-        <div className="col-span-2 sm:col-span-1">
-          <label className="mb-1 block text-xs text-slate-500">Peso limite (kg)</label>
-          <input
-            type="number"
-            value={weightLimitKg}
-            onChange={(e) => setWeightLimitKg(e.target.value)}
-            placeholder="aberta"
-            className="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-500"
-          />
-        </div>
-      </div>
-      {error && <p className="mb-2 text-sm text-red-400">{error}</p>}
-      <div className="flex gap-2">
-        <button
-          type="submit"
-          disabled={loading}
-          className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:opacity-60"
-        >
-          Criar
-        </button>
-        <button
-          type="button"
-          onClick={onDone}
-          className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800"
-        >
-          Cancelar
-        </button>
-      </div>
-    </form>
   )
 }
 
@@ -894,6 +554,13 @@ function AreaRow({
       {error && <p className="mt-2 text-sm text-red-400">{error}</p>}
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
+        <Link
+          href={`/display/areas/${area.id}`}
+          target="_blank"
+          className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800"
+        >
+          Placar público desta área
+        </Link>
         {canManage && (
           <button
             type="button"
@@ -1235,6 +902,23 @@ interface AthleteListItem {
   preferredName?: string
 }
 
+// GET /athletes caps pageSize at 100 server-side and returns `total` — a
+// single `?pageSize=100` call silently drops anyone past the 100th (sorted
+// by name) with no indication to the operator. Paging through every page
+// instead of raising the limit keeps this correct at any academy size.
+async function fetchAllAthletes(): Promise<AthleteListItem[]> {
+  const pageSize = 100
+  let page = 1
+  const all: AthleteListItem[] = []
+  for (;;) {
+    const data = await apiFetch<{ items: AthleteListItem[]; total: number }>(`/athletes?page=${page}&pageSize=${pageSize}`)
+    all.push(...data.items)
+    if (data.items.length === 0 || all.length >= data.total) break
+    page += 1
+  }
+  return all
+}
+
 function EntriesSection({
   eventId,
   divisions,
@@ -1257,13 +941,13 @@ function EntriesSection({
 
   const load = useCallback(async () => {
     try {
-      const [entriesData, athletesData] = await Promise.all([
+      const [entriesData, allAthletes] = await Promise.all([
         apiFetch<EntryDTO[]>(`/events/${eventId}/entries`),
-        apiFetch<{ items: AthleteListItem[] }>('/athletes?pageSize=100'),
+        fetchAllAthletes(),
       ])
       setEntries(entriesData)
       const map: Record<string, AthleteListItem> = {}
-      for (const a of athletesData.items) map[a.id] = a
+      for (const a of allAthletes) map[a.id] = a
       setAthletes(map)
     } catch {
       setError('Não foi possível carregar as inscrições.')
@@ -1293,6 +977,14 @@ function EntriesSection({
             className="mr-2 rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-300 hover:bg-slate-800"
           >
             Check-in
+          </Link>
+        )}
+        {canWeighIn && (
+          <Link
+            href={`/events/${eventId}/weighin`}
+            className="mr-2 rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-300 hover:bg-slate-800"
+          >
+            Pesagem
           </Link>
         )}
         {canOperate && divisions.length > 0 && (
@@ -1518,16 +1210,12 @@ function EntryRow({
   canWeighIn: boolean
   onChanged: () => void
 }) {
-  const [weighInValue, setWeighInValue] = useState('')
   const [confirmDivisionId, setConfirmDivisionId] = useState(entry.divisionId)
   const [withdrawReason, setWithdrawReason] = useState('')
-  const [showWeighIn, setShowWeighIn] = useState(false)
   const [showConfirm, setShowConfirm] = useState(false)
-  const [readingScale, setReadingScale] = useState(false)
   const [showWithdraw, setShowWithdraw] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [weighInOutcome, setWeighInOutcome] = useState<string | null>(null)
 
   async function run(action: () => Promise<unknown>) {
     setLoading(true)
@@ -1544,60 +1232,6 @@ function EntryRow({
 
   const handleCheckIn = () =>
     run(() => apiFetch(`/events/${eventId}/entries/${entry.id}/checkin`, { method: 'PATCH' }))
-
-  // Weigh-in gets its own error handling (rather than the shared `run()`
-  // helper) so a network failure can be queued for later sync instead of
-  // just showing an error — see lib/offlineQueue.ts for why weigh-in
-  // specifically is one of the two flows that queue.
-  const handleWeighIn = async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const result = await apiFetch<{ outcome: 'ok' | 'reallocated' | 'disqualified' }>(
-        `/events/${eventId}/entries/${entry.id}/weighin`,
-        { method: 'PATCH', body: JSON.stringify({ weightKg: Number(weighInValue) }) },
-      )
-      if (result.outcome === 'reallocated') {
-        setWeighInOutcome('Peso acima do limite: atleta realocada automaticamente para a categoria correta.')
-      } else if (result.outcome === 'disqualified') {
-        setWeighInOutcome('Peso acima do limite: atleta desclassificada desta divisão.')
-      } else {
-        setWeighInOutcome(null)
-      }
-      onChanged()
-      setShowWeighIn(false)
-    } catch (err) {
-      if (!(err instanceof ApiError)) {
-        await enqueueOfflineWrite({
-          path: `/events/${eventId}/entries/${entry.id}/weighin`,
-          method: 'PATCH',
-          body: { weightKg: Number(weighInValue) },
-          description: `Pesagem: ${athleteName} (${weighInValue}kg)`,
-        })
-        setWeighInOutcome('Sem conexão — pesagem salva neste aparelho, vai sincronizar automaticamente.')
-        setShowWeighIn(false)
-      } else {
-        setError(translateApiError(err.message))
-      }
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const handleReadScale = async () => {
-    setReadingScale(true)
-    try {
-      const result = await apiFetch<{ connected: boolean; reading: { weightKg: number } | null }>('/scale/reading')
-      if (result.reading) {
-        setWeighInValue(String(result.reading.weightKg))
-      }
-      // Disconnected/no reading: leave the field as-is — manual entry never blocked (CLAUDE.md).
-    } catch {
-      // hardware failure must never block manual entry — fail silently, operator keeps typing
-    } finally {
-      setReadingScale(false)
-    }
-  }
 
   const handleConfirm = () =>
     run(() =>
@@ -1634,7 +1268,6 @@ function EntryRow({
       {entry.disqualifiedReason && (
         <p className="mt-1 text-sm text-red-400">Desclassificada: {entry.disqualifiedReason}</p>
       )}
-      {weighInOutcome && <p className="mt-2 text-sm text-amber-400">{weighInOutcome}</p>}
 
       {error && <p className="mt-2 text-sm text-red-400">{error}</p>}
 
@@ -1650,50 +1283,13 @@ function EntryRow({
           </button>
         )}
 
-        {canWeighIn && entry.status === 'checked_in' && !showWeighIn && (
-          <button
-            type="button"
-            onClick={() => setShowWeighIn(true)}
+        {canWeighIn && entry.status === 'checked_in' && (
+          <Link
+            href={`/events/${eventId}/weighin`}
             className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800"
           >
-            Registrar pesagem
-          </button>
-        )}
-        {canWeighIn && showWeighIn && (
-          <div className="flex items-center gap-2">
-            <input
-              type="number"
-              autoFocus
-              value={weighInValue}
-              onChange={(e) => setWeighInValue(e.target.value)}
-              placeholder="kg"
-              className="w-24 rounded-lg border border-slate-700 bg-slate-800 px-3 py-1.5 text-sm text-white placeholder-slate-500"
-            />
-            <button
-              type="button"
-              onClick={handleReadScale}
-              disabled={readingScale}
-              title="Ler peso da balança conectada"
-              className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-800 disabled:opacity-60"
-            >
-              {readingScale ? 'Lendo…' : '⚖ Ler balança'}
-            </button>
-            <button
-              type="button"
-              onClick={handleWeighIn}
-              disabled={loading}
-              className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-500 disabled:opacity-60"
-            >
-              Confirmar peso
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowWeighIn(false)}
-              className="text-sm text-slate-400 hover:text-slate-200"
-            >
-              Cancelar
-            </button>
-          </div>
+            Pesar na tela de pesagem →
+          </Link>
         )}
 
         {canManage && entry.status === 'weighed_in' && !showConfirm && (
