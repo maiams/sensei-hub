@@ -9,6 +9,7 @@ export default function Setup() {
       subtitle="Configure a organização anfitriã para começar."
       organizationLabel="Nome da organização"
       organizationPlaceholder="Ex: Liga Municipal de Judô"
+      afterLoginHref="/events"
     />
   )
 }

@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { apiFetch, isLoggedIn } from '../../lib/api'
+import { hasMinRole, type UserRole } from '@sensei-hub/shared'
+import { apiFetch, getCurrentRole, isLoggedIn } from '../../lib/api'
 import { EVENT_STATUS_LABELS, formatDate } from '../../lib/labels'
 
 interface EventListItem {
@@ -18,6 +19,7 @@ export default function EventsPage() {
   const router = useRouter()
   const [events, setEvents] = useState<EventListItem[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [canCreate, setCanCreate] = useState(false)
 
   const load = useCallback(async () => {
     try {
@@ -33,6 +35,8 @@ export default function EventsPage() {
       router.replace('/login')
       return
     }
+    const role = getCurrentRole()
+    setCanCreate(role !== null && hasMinRole(role as UserRole, 'event_manager'))
     void load()
   }, [router, load])
 
@@ -43,12 +47,14 @@ export default function EventsPage() {
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Eventos</h1>
           </div>
-          <Link
-            href="/events/new"
-            className="rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-500"
-          >
-            + Criar evento
-          </Link>
+          {canCreate && (
+            <Link
+              href="/events/new"
+              className="rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-500"
+            >
+              + Criar evento
+            </Link>
+          )}
         </div>
 
         {error && (

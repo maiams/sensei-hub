@@ -64,7 +64,7 @@ export function AppHeader() {
   }
 
   return (
-    <header className="border-b border-slate-800 bg-slate-950 px-4 py-3 text-white">
+    <header className="border-b border-slate-800 bg-slate-950 px-4 py-3 text-white print:hidden">
       <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-x-6 gap-y-2">
         <Link href="/events" className="text-sm font-bold tracking-tight text-white">
           Sensei Arena

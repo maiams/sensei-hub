@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
+import { setTokens } from './api'
 
 interface ApiErrorBody {
   error: string
@@ -16,9 +17,13 @@ export interface SetupPageProps {
   // "Academia" no dojô, "Organização" na arena — mesmo campo no backend
   organizationLabel: string
   organizationPlaceholder: string
+  // Where to land once setup finishes and the just-created admin is
+  // auto-logged-in (same idea as LoginPage.afterLoginHref) — e.g. "/events"
+  // on the Arena, "/athletes" on the Dojô.
+  afterLoginHref: string
 }
 
-export function SetupPage({ productName, subtitle, organizationLabel, organizationPlaceholder }: SetupPageProps) {
+export function SetupPage({ productName, subtitle, organizationLabel, organizationPlaceholder, afterLoginHref }: SetupPageProps) {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -46,6 +51,26 @@ export function SetupPage({ productName, subtitle, organizationLabel, organizati
       })
 
       if (res.ok) {
+        // Auto-login with the credentials the admin just typed — they
+        // already proved they know them by submitting this form, so making
+        // them re-type everything on /login right after is pure friction.
+        // If the login call itself fails for any reason, fall back to the
+        // old behavior (send them to /login) rather than getting stuck.
+        try {
+          const loginRes = await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: payload.adminEmail, password: payload.adminPassword }),
+          })
+          if (loginRes.ok) {
+            const body = (await loginRes.json()) as { accessToken: string; refreshToken: string }
+            setTokens(body.accessToken, body.refreshToken)
+            router.replace(afterLoginHref)
+            return
+          }
+        } catch {
+          // fall through to /login below
+        }
         router.replace('/login')
         return
       }

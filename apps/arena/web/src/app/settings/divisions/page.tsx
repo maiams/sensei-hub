@@ -100,6 +100,21 @@ export default function DivisionsSettingsPage() {
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [canEdit, setCanEdit] = useState(false)
+  // Collapsed by default — with the full FPJ preset (6 age divisions, each
+  // with several weight groups) showing everything expanded at once is a
+  // wall of inputs. Same collapsible pattern as DivisionsPanel (the event's
+  // divisions list): a header row per division, expand only what you're
+  // editing.
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+
+  function toggleExpanded(key: string) {
+    setExpanded((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
 
   const dirty = useMemo(
     () => serverDraft !== null && draft !== null && JSON.stringify(serverDraft) !== JSON.stringify(draft),
@@ -292,6 +307,8 @@ export default function DivisionsSettingsPage() {
             key={template.id}
             template={template}
             canEdit={canEdit}
+            expanded={expanded.has(template.key)}
+            onToggle={() => toggleExpanded(template.key)}
             onChange={(updated) => updateTemplate(index, updated)}
             onDeleteDivision={() => {
               const groupCount = template.groups.length
@@ -414,6 +431,8 @@ function rulesSummary(rules: RulesDraft): string {
 function DivisionCard({
   template,
   canEdit,
+  expanded,
+  onToggle,
   onChange,
   onDeleteDivision,
   onAddGroup,
@@ -422,6 +441,8 @@ function DivisionCard({
 }: {
   template: TemplateDraft
   canEdit: boolean
+  expanded: boolean
+  onToggle: () => void
   onChange: (updated: TemplateDraft) => void
   onDeleteDivision: () => void
   onAddGroup: (label: string) => void
@@ -446,188 +467,205 @@ function DivisionCard({
     'rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-white placeholder-slate-500 disabled:opacity-60'
 
   return (
-    <section className="rounded-lg border border-slate-800 bg-slate-900 p-4">
-      {canEdit ? (
-        <>
-          <div className="mb-3 flex flex-wrap items-end gap-2">
-            <div className="flex-1">
-              <label className="mb-1 block text-xs text-slate-500">Nome da divisão</label>
-              <input
-                type="text"
-                value={template.label}
-                onChange={(e) => onChange({ ...template, label: e.target.value })}
-                className={`w-full ${inputClass}`}
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs text-slate-500">Idade mín.</label>
-              <input
-                type="number"
-                min="0"
-                max="120"
-                value={template.minAge}
-                onChange={(e) => onChange({ ...template, minAge: e.target.value })}
-                placeholder="—"
-                className={`w-24 ${inputClass}`}
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs text-slate-500">Idade máx.</label>
-              <input
-                type="number"
-                min="0"
-                max="120"
-                value={template.maxAge}
-                onChange={(e) => onChange({ ...template, maxAge: e.target.value })}
-                placeholder="sem limite"
-                className={`w-24 ${inputClass}`}
-              />
-            </div>
-            <button
-              type="button"
-              onClick={onDeleteDivision}
-              className="rounded-lg border border-red-900 px-4 py-2 text-sm text-red-400 transition hover:bg-red-950"
-            >
-              Apagar divisão
-            </button>
-          </div>
+    <section className="rounded-lg border border-slate-800 bg-slate-900">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex w-full flex-wrap items-center justify-between gap-2 px-4 py-3 text-left"
+      >
+        <span className="font-semibold text-white">
+          {expanded ? '▾' : '▸'} {template.label}
+        </span>
+        <span className="text-xs text-slate-500">
+          {ageRangeLabel(template.minAge, template.maxAge)} · {template.groups.length} grupo(s)
+        </span>
+      </button>
 
-          <div className="mb-4 rounded-lg border border-slate-800 bg-slate-950/60 p-3">
-            <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">
-              Regras de luta — padrão CBJ (RNC 2025), edite livremente
-            </p>
-            <div className="flex flex-wrap items-end gap-x-4 gap-y-2 text-sm">
-              <div>
-                <label className="mb-1 block text-xs text-slate-500">Tempo de luta (min)</label>
-                <input
-                  type="number"
-                  min="0.5"
-                  max="20"
-                  step="0.5"
-                  value={template.rules.matchDurationMin}
-                  onChange={(e) => setRules({ matchDurationMin: e.target.value })}
-                  className={`w-24 text-sm ${inputClass}`}
-                />
+      {expanded && (
+        <div className="space-y-4 border-t border-slate-800 p-4">
+          {canEdit ? (
+            <>
+              <div className="mb-3 flex flex-wrap items-end gap-2">
+                <div className="flex-1">
+                  <label className="mb-1 block text-xs text-slate-500">Nome da divisão</label>
+                  <input
+                    type="text"
+                    value={template.label}
+                    onChange={(e) => onChange({ ...template, label: e.target.value })}
+                    className={`w-full ${inputClass}`}
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs text-slate-500">Idade mín.</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="120"
+                    value={template.minAge}
+                    onChange={(e) => onChange({ ...template, minAge: e.target.value })}
+                    placeholder="—"
+                    className={`w-24 ${inputClass}`}
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs text-slate-500">Idade máx.</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="120"
+                    value={template.maxAge}
+                    onChange={(e) => onChange({ ...template, maxAge: e.target.value })}
+                    placeholder="sem limite"
+                    className={`w-24 ${inputClass}`}
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={onDeleteDivision}
+                  className="rounded-lg border border-red-900 px-4 py-2 text-sm text-red-400 transition hover:bg-red-950"
+                >
+                  Apagar divisão
+                </button>
               </div>
-              <label className="flex items-center gap-2 pb-2 text-sm text-slate-300">
-                <input
-                  type="checkbox"
-                  checked={template.rules.goldenScoreEnabled}
-                  onChange={(e) => setRules({ goldenScoreEnabled: e.target.checked })}
-                  className="h-4 w-4 accent-blue-600"
-                />
-                Golden score
-              </label>
-              <div>
-                <label className="mb-1 block text-xs text-slate-500">Limite do GS (min)</label>
-                <input
-                  type="number"
-                  min="0.5"
-                  max="20"
-                  step="0.5"
-                  value={template.rules.goldenScoreLimitMin}
-                  disabled={!template.rules.goldenScoreEnabled}
-                  onChange={(e) => setRules({ goldenScoreLimitMin: e.target.value })}
-                  placeholder="sem limite"
-                  className={`w-28 text-sm ${inputClass}`}
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs text-slate-500">Osaekomi — Yuko (s)</label>
-                <input
-                  type="number"
-                  min="1"
-                  max="60"
-                  value={template.rules.osaekomiYuko}
-                  onChange={(e) => setRules({ osaekomiYuko: e.target.value })}
-                  className={`w-20 text-sm ${inputClass}`}
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs text-slate-500">Waza-ari (s)</label>
-                <input
-                  type="number"
-                  min="1"
-                  max="60"
-                  value={template.rules.osaekomiWazaari}
-                  onChange={(e) => setRules({ osaekomiWazaari: e.target.value })}
-                  className={`w-20 text-sm ${inputClass}`}
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs text-slate-500">Ippon (s)</label>
-                <input
-                  type="number"
-                  min="1"
-                  max="60"
-                  value={template.rules.osaekomiIppon}
-                  onChange={(e) => setRules({ osaekomiIppon: e.target.value })}
-                  className={`w-20 text-sm ${inputClass}`}
-                />
-              </div>
-            </div>
-          </div>
-        </>
-      ) : (
-        <div className="mb-4">
-          <h2 className="text-lg font-semibold text-white">{template.label}</h2>
-          <p className="text-sm text-slate-500">{ageRangeLabel(template.minAge, template.maxAge)}</p>
-          <p className="mt-1 text-sm text-slate-500">{rulesSummary(template.rules)}</p>
-        </div>
-      )}
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        {template.groups.map((group, groupIndex) => (
-          <WeightCategoryGrid
-            key={group.id}
-            group={group}
-            canEdit={canEdit}
-            onChange={(updated) =>
-              onChange({ ...template, groups: template.groups.map((g, i) => (i === groupIndex ? updated : g)) })
-            }
-            onDelete={() => onDeleteGroup(group)}
-            onRestore={() => onRestoreGroup(group)}
-          />
-        ))}
-      </div>
-
-      {template.groups.length === 0 && <p className="text-sm text-slate-500">Nenhum grupo nesta divisão ainda.</p>}
-
-      {canEdit && (
-        <div className="mt-4">
-          {addingGroup ? (
-            <form onSubmit={handleAddGroup} className="flex items-center gap-2">
-              <input
-                type="text"
-                required
-                autoFocus
-                value={newGroupLabel}
-                onChange={(e) => setNewGroupLabel(e.target.value)}
-                placeholder="Nome do grupo (ex: Masculino, Misto, Cadeirantes)"
-                className="flex-1 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-500"
-              />
-              <button
-                type="submit"
-                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-500"
-              >
-                Criar
-              </button>
-              <button
-                type="button"
-                onClick={() => setAddingGroup(false)}
-                className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-300 hover:bg-slate-800"
-              >
-                Cancelar
-              </button>
-            </form>
+              <div className="mb-4 rounded-lg border border-slate-800 bg-slate-950/60 p-3">
+                <p className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">
+                  Regras de luta — padrão CBJ (RNC 2025), edite livremente
+                </p>
+                <div className="flex flex-wrap items-end gap-x-4 gap-y-2 text-sm">
+                  <div>
+                    <label className="mb-1 block text-xs text-slate-500">Tempo de luta (min)</label>
+                    <input
+                      type="number"
+                      min="0.5"
+                      max="20"
+                      step="0.5"
+                      value={template.rules.matchDurationMin}
+                      onChange={(e) => setRules({ matchDurationMin: e.target.value })}
+                      className={`w-24 text-sm ${inputClass}`}
+                    />
+                  </div>
+                  <label className="flex items-center gap-2 pb-2 text-sm text-slate-300">
+                    <input
+                      type="checkbox"
+                      checked={template.rules.goldenScoreEnabled}
+                      onChange={(e) => setRules({ goldenScoreEnabled: e.target.checked })}
+                      className="h-4 w-4 accent-blue-600"
+                    />
+                    Golden score
+                  </label>
+                  <div>
+                    <label className="mb-1 block text-xs text-slate-500">Limite do GS (min)</label>
+                    <input
+                      type="number"
+                      min="0.5"
+                      max="20"
+                      step="0.5"
+                      value={template.rules.goldenScoreLimitMin}
+                      disabled={!template.rules.goldenScoreEnabled}
+                      onChange={(e) => setRules({ goldenScoreLimitMin: e.target.value })}
+                      placeholder="sem limite"
+                      className={`w-28 text-sm ${inputClass}`}
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs text-slate-500">Osaekomi — Yuko (s)</label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="60"
+                      value={template.rules.osaekomiYuko}
+                      onChange={(e) => setRules({ osaekomiYuko: e.target.value })}
+                      className={`w-20 text-sm ${inputClass}`}
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs text-slate-500">Waza-ari (s)</label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="60"
+                      value={template.rules.osaekomiWazaari}
+                      onChange={(e) => setRules({ osaekomiWazaari: e.target.value })}
+                      className={`w-20 text-sm ${inputClass}`}
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs text-slate-500">Ippon (s)</label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="60"
+                      value={template.rules.osaekomiIppon}
+                      onChange={(e) => setRules({ osaekomiIppon: e.target.value })}
+                      className={`w-20 text-sm ${inputClass}`}
+                    />
+                  </div>
+                </div>
+              </div>
+            </>
           ) : (
-            <button
-              type="button"
-              onClick={() => setAddingGroup(true)}
-              className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-300 hover:bg-slate-800"
-            >
-              + Adicionar grupo
-            </button>
+            <div className="mb-4">
+              <p className="text-sm text-slate-500">{rulesSummary(template.rules)}</p>
+            </div>
+          )}
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            {template.groups.map((group, groupIndex) => (
+              <WeightCategoryGrid
+                key={group.id}
+                group={group}
+                canEdit={canEdit}
+                onChange={(updated) =>
+                  onChange({ ...template, groups: template.groups.map((g, i) => (i === groupIndex ? updated : g)) })
+                }
+                onDelete={() => onDeleteGroup(group)}
+                onRestore={() => onRestoreGroup(group)}
+              />
+            ))}
+          </div>
+
+          {template.groups.length === 0 && (
+            <p className="text-sm text-slate-500">Nenhum grupo nesta divisão ainda.</p>
+          )}
+
+          {canEdit && (
+            <div>
+              {addingGroup ? (
+                <form onSubmit={handleAddGroup} className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    required
+                    autoFocus
+                    value={newGroupLabel}
+                    onChange={(e) => setNewGroupLabel(e.target.value)}
+                    placeholder="Nome do grupo (ex: Masculino, Misto, Cadeirantes)"
+                    className="flex-1 rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white placeholder-slate-500"
+                  />
+                  <button
+                    type="submit"
+                    className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-500"
+                  >
+                    Criar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAddingGroup(false)}
+                    className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-300 hover:bg-slate-800"
+                  >
+                    Cancelar
+                  </button>
+                </form>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setAddingGroup(true)}
+                  className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-300 hover:bg-slate-800"
+                >
+                  + Adicionar grupo
+                </button>
+              )}
+            </div>
           )}
         </div>
       )}
