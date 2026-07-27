@@ -431,6 +431,110 @@ describe('Scoreboard lifecycle', () => {
   })
 })
 
+// Resilience: the scoreboard is the one flow where CLAUDE.md explicitly
+// worries about out-of-order arrival ("se um waza-ari chegar depois de
+// declarar vencedor, aplicar cegamente corrompe o resultado"). It is
+// deliberately NOT part of the offline queue (see offlineQueue.ts's module
+// comment) — the operator is live at the mat — but the design choice for
+// how its state is stored still has to hold up under a late/out-of-order
+// write, because the same class of bug (two requests racing on one
+// document) can happen from ordinary network jitter, not just a queue.
+//
+// Decision: keep the scoreboard as ONE mutable snapshot document per match
+// (not an event log of "add waza-ari" / "declare winner" events replayed in
+// order) and layer TWO independent guards on top of it:
+//   1. The `status` field itself ('active' -> 'completed'/'aborted') already
+//      gates every mutating method (#findActive) — once a match is decided,
+//      a later mutation attempt is rejected outright. This handles the
+//      ORDERED case (requests arrive one after another, which is what
+//      actually happens: HTTP requests are handled to completion serially
+//      on this single Node process).
+//   2. Mongoose `optimisticConcurrency` (a monotonic `__v` on ScoreboardModel)
+//      catches the genuinely CONCURRENT case — two requests that both read
+//      the pre-mutation document before either saves — turning a silent
+//      stale write into an explicit 409 (ScoreboardService#save).
+// A full event-sourced rewrite was considered and rejected: nothing else in
+// this codebase treats the scoreboard as anything but current-state (bracket
+// results, public display, WS broadcast all read the live document), and the
+// two guards above already close the actual corruption path without that
+// larger redesign.
+describe('Scoreboard resilience — late/out-of-order writes', () => {
+  it('a "waza-ari" arriving after the winner was already declared is rejected, never silently applied on a decided match', async () => {
+    const { token, eventId, areaId, match } = await setupFight()
+    const sb = (await startScoreboard(token, eventId, areaId, match.id)).json<ScoreboardDTO>()
+
+    const winnerRes = await act(token, sb.id, 'winner', { winnerId: sb.sides.A.athleteId, method: 'ippon' })
+    expect(winnerRes.statusCode).toBe(200)
+    expect(winnerRes.json<ScoreboardDTO>().status).toBe('completed')
+
+    // The late score: same request an operator's "waza-ari" tap would send,
+    // just arriving strictly after the decision was already recorded.
+    const lateWazaAri = await act(token, sb.id, 'score', { side: 'B', type: 'wazaari' })
+    expect(lateWazaAri.statusCode).toBe(409)
+
+    // The match result is untouched by the rejected late write.
+    const stillDone = await app.inject({
+      method: 'GET',
+      url: `/api/scoreboards/${sb.id}`,
+      headers: { authorization: `Bearer ${token}` },
+    })
+    const dto = stillDone.json<ScoreboardDTO>()
+    expect(dto.status).toBe('completed')
+    expect(dto.sides.B.wazaari).toBe(0)
+  })
+
+  it('two requests racing on the SAME scoreboard document (one stale) — the loser gets a version conflict, not a silent overwrite', async () => {
+    const { token, eventId, areaId, match } = await setupFight()
+    const sb = (await startScoreboard(token, eventId, areaId, match.id)).json<ScoreboardDTO>()
+
+    // Two independent reads of the same document, as two racing requests
+    // would each do internally (#findActive) before mutating.
+    const docA = await ScoreboardModel.findOne({ _id: sb.id })
+    const docB = await ScoreboardModel.findOne({ _id: sb.id })
+    expect(docA).not.toBeNull()
+    expect(docB).not.toBeNull()
+
+    docA!.sides.A.wazaari = 1
+    await docA!.save() // wins the race — version advances
+
+    docB!.sides.B.wazaari = 1
+    // docB is still holding the PRE-mutation version — its save() must be
+    // rejected rather than silently landing on top of docA's change.
+    await expect(docB!.save()).rejects.toThrow()
+
+    const final = await ScoreboardModel.findOne({ _id: sb.id })
+    expect(final?.sides.A.wazaari).toBe(1)
+    expect(final?.sides.B.wazaari).toBe(0) // the loser's mutation never took effect
+  })
+
+  it('the service surfaces a racing write as a 409, not a 500 or a hang', async () => {
+    const { token, eventId, areaId, match } = await setupFight()
+    const sb = (await startScoreboard(token, eventId, areaId, match.id)).json<ScoreboardDTO>()
+
+    // Force the document into a stale state relative to what the running
+    // service holds internally, by bumping its version directly — the next
+    // service-level mutation attempt against the id must hit the same
+    // VersionError path ScoreboardService#save translates to 409.
+    await act(token, sb.id, 'score', { side: 'A', type: 'yuko' }) // advances __v once via the real service
+
+    // Simulate a second in-flight request that read the document at the
+    // OLDER version by racing two real HTTP calls against the same
+    // scoreboard concurrently.
+    const [first, second] = await Promise.all([
+      act(token, sb.id, 'score', { side: 'A', type: 'yuko' }),
+      act(token, sb.id, 'score', { side: 'B', type: 'yuko' }),
+    ])
+    const codes = [first.statusCode, second.statusCode].sort()
+    // Either both happened to be serialized cleanly (both 200 — acceptable,
+    // Node's single-threaded event loop may not interleave these two I/O
+    // chains at all) or one lost the race and got a 409 — what must NEVER
+    // happen is a 500 (crash) or a response other than 200/409.
+    for (const code of codes) {
+      expect([200, 409]).toContain(code)
+    }
+  })
+})
+
 describe('Public payloads and privacy', () => {
   it('public scoreboard hides minor names when the event sets publicHideNamesUnderAge; operator keeps full names', async () => {
     const { token, eventId, areaId, match } = await setupFight({

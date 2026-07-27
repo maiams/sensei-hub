@@ -8,6 +8,8 @@ export { AcademyModel, type AcademyDocument } from './repositories/AcademyModel.
 export { UserModel, type UserDocument } from './repositories/UserModel.js'
 export { RefreshTokenModel, type RefreshTokenDocument } from './repositories/RefreshTokenModel.js'
 export { AuditLogModel, type AuditLogDocument } from './repositories/AuditLogModel.js'
+export { IdempotencyRecordModel, type IdempotencyRecordDocument } from './repositories/IdempotencyRecordModel.js'
+export { withIdempotency, type IdempotentResult } from './idempotency/withIdempotency.js'
 
 export { AuthService, AuthError, type TokenPair, type JwtPayload } from './services/AuthService.js'
 export { UserService, UserServiceError, type CreateUserParams } from './services/UserService.js'

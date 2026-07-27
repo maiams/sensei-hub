@@ -23,16 +23,19 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb'
 import { getAccessToken } from './api'
 import { translateApiError } from './labels'
+import { getStationId, nextClientSeq } from './station'
 
 export type QueueableMethod = 'POST' | 'PATCH' | 'DELETE'
 
 export interface OfflineWriteRecord {
-  id: string
+  id: string // also doubles as the Idempotency-Key sent on replay — see drainOfflineQueue
   path: string // relative to /api, same convention as apiFetch's `path` argument
   method: QueueableMethod
   body: unknown
   description: string // human-readable label for the sync status UI
-  createdAt: string
+  createdAt: string // client wall clock at enqueue time — "when it actually happened" (sent as X-Occurred-At; informational only, never used to order or gate anything server-side)
+  stationId: string // this browser's stable identity — see lib/station.ts
+  clientSeq: number // this station's own monotonic counter, NOT wall time — see lib/station.ts
   status: 'pending' | 'failed'
   error?: string
   attempts: number
@@ -77,6 +80,8 @@ export async function enqueueOfflineWrite(input: {
     body: input.body,
     description: input.description,
     createdAt: new Date().toISOString(),
+    stationId: getStationId(),
+    clientSeq: nextClientSeq(),
     status: 'pending',
     attempts: 0,
   }
@@ -133,6 +138,16 @@ export async function drainOfflineQueue(): Promise<{ succeeded: number; failed: 
       const token = getAccessToken()
       const headers = new Headers({ 'Content-Type': 'application/json' })
       if (token) headers.set('Authorization', `Bearer ${token}`)
+      // Makes this replay safe to resend: the server dedupes by
+      // Idempotency-Key (packages/core-server/src/idempotency/
+      // withIdempotency.ts), so a write that already succeeded but whose
+      // response never reached this browser (connection dropped after the
+      // server committed) comes back as the SAME result instead of a fresh
+      // attempt or a confusing "already done" error.
+      headers.set('Idempotency-Key', record.id)
+      headers.set('X-Station-Id', record.stationId)
+      headers.set('X-Client-Seq', String(record.clientSeq))
+      headers.set('X-Occurred-At', record.createdAt)
       const res = await fetch(`/api${record.path}`, {
         method: record.method,
         headers,

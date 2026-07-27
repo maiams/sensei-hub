@@ -116,7 +116,22 @@ const scoreboardSchema = new Schema<ScoreboardDocument>(
     abortReason: { type: String },
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
   },
-  { timestamps: true },
+  {
+    timestamps: true,
+    // Monotonic version guard: every `.save()` checks the document's `__v`
+    // hasn't moved since it was read, and increments it on success. Two
+    // requests racing on the SAME live scoreboard (e.g. a "waza-ari" and a
+    // "declare winner" landing back-to-back) can otherwise both read the
+    // pre-mutation document and both write, silently applying the score
+    // after the fight was already decided. With this on, the loser of the
+    // race gets a Mongoose VersionError instead of a stale write — see
+    // ScoreboardService#save, which turns that into a 409 the operator can
+    // retry. (The scoreboard's own status field — 'active' vs 'completed'/
+    // 'aborted' — already blocks late mutations in the common, ordered
+    // case; this closes the genuinely-concurrent gap that status alone
+    // can't.)
+    optimisticConcurrency: true,
+  },
 )
 
 // One live scoreboard per match at a time (aborted/completed ones remain as history).

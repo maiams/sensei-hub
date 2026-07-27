@@ -1,6 +1,7 @@
 import { AthleteModel } from '../repositories/AthleteModel.js'
 import { WeightRecordModel, type WeightRecordDocument } from '../repositories/WeightRecordModel.js'
 import { AuditLogModel } from '@sensei-hub/core-server'
+import { resolveOccurredAt, parseOccurredAtOrUndefined } from '../domain/offlineWrite.js'
 import type { WeightSource } from '@sensei-hub/shared'
 import type { AuthCtx } from '@sensei-hub/core-server'
 
@@ -17,12 +18,17 @@ export class WeightService {
       weightKg,
       source,
       operatorId: ctx.userId,
-      recordedAt: new Date(),
+      // The business fact "when was the athlete actually weighed" —
+      // preserved from the offline queue's own timestamp when this request
+      // was replayed late; server-receipt time lives separately on the
+      // AuditLog entry below, which is always "now".
+      recordedAt: resolveOccurredAt(ctx.occurredAt),
     })
 
     athlete.latestWeightKg = weightKg
     await athlete.save()
 
+    const weighInOccurredAt = parseOccurredAtOrUndefined(ctx.occurredAt)
     await AuditLogModel.create({
       userId: ctx.userId,
       entityType: 'WeightRecord',
@@ -30,6 +36,13 @@ export class WeightService {
       action: 'create',
       sessionId: ctx.sessionId,
       ip: ctx.ip,
+      // Set only when this weigh-in came off the offline queue (replayed
+      // after a connectivity gap) — see AuthCtx's doc comment. The weigh-in
+      // may be RECORDED (this AuditLog's own `timestamp`) well after it
+      // actually HAPPENED at the mat; `occurredAt` preserves that fact.
+      ...(weighInOccurredAt ? { occurredAt: weighInOccurredAt } : {}),
+      ...(ctx.stationId !== undefined ? { stationId: ctx.stationId } : {}),
+      ...(ctx.clientSeq !== undefined ? { clientSeq: ctx.clientSeq } : {}),
     })
 
     return this.#toDTO(record)

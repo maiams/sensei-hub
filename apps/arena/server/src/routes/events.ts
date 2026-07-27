@@ -5,7 +5,7 @@ import { EventService, EventServiceError } from '../services/EventService.js'
 import { DivisionService, DivisionServiceError } from '../services/DivisionService.js'
 import { EventEntryService, EventEntryServiceError } from '../services/EventEntryService.js'
 import { BracketService, BracketServiceError } from '../services/BracketService.js'
-import { authenticate } from '@sensei-hub/core-server'
+import { authenticate, withIdempotency, type IdempotentResult } from '@sensei-hub/core-server'
 import { authorize } from '@sensei-hub/core-server'
 
 const CreateEventBody = CreateEventInput.omit({ hostAcademyId: true })
@@ -39,6 +39,26 @@ export async function eventRoutes(app: FastifyInstance): Promise<void> {
     throw err
   }
 
+  // Client-side headers set only when the request came through the durable
+  // offline queue (apps/arena/web/src/lib/offlineQueue.ts) — see AuthCtx's
+  // doc comment (packages/core-server/src/context.ts) for why each exists.
+  function offlineMeta(request: FastifyRequest) {
+    const stationId = request.headers['x-station-id']
+    const clientSeqHeader = request.headers['x-client-seq']
+    const occurredAt = request.headers['x-occurred-at']
+    const clientSeq = typeof clientSeqHeader === 'string' ? Number.parseInt(clientSeqHeader, 10) : NaN
+    return {
+      ...(typeof stationId === 'string' && stationId.length > 0 ? { stationId } : {}),
+      ...(Number.isFinite(clientSeq) ? { clientSeq } : {}),
+      ...(typeof occurredAt === 'string' && occurredAt.length > 0 ? { occurredAt } : {}),
+    }
+  }
+
+  function idempotencyKeyFrom(request: FastifyRequest): string | undefined {
+    const header = request.headers['idempotency-key']
+    return typeof header === 'string' && header.length > 0 ? header : undefined
+  }
+
   function ctxFrom(request: FastifyRequest) {
     return {
       userId: request.authUser.id,
@@ -46,6 +66,7 @@ export async function eventRoutes(app: FastifyInstance): Promise<void> {
       role: request.authUser.role,
       sessionId: request.id,
       ip: request.ip,
+      ...offlineMeta(request),
     }
   }
 
@@ -251,12 +272,35 @@ export async function eventRoutes(app: FastifyInstance): Promise<void> {
       if (!parsed.success) {
         return reply.status(400).send({ error: 'Validation failed', details: parsed.error.flatten() })
       }
-      try {
-        const entry = await entryService.recordWeighIn(id, request.authUser.academyId, eid, parsed.data.weightKg, ctxFrom(request))
-        return reply.send(entry)
-      } catch (err) {
-        return handleError(err, reply)
-      }
+      // Weigh-in is the other flow the offline queue replays (the first is
+      // check-in, apps/arena/server/src/routes/checkin.ts) — same
+      // idempotency-key replay contract: a resent PATCH must return the
+      // SAME outcome (ok/reallocated/disqualified) it already produced, not
+      // re-run the weight transition a second time.
+      return withIdempotency({
+        key: idempotencyKeyFrom(request),
+        route: 'PATCH /events/:id/entries/:eid/weighin',
+        academyId: request.authUser.academyId,
+        userId: request.authUser.id,
+        reply,
+        run: async (): Promise<IdempotentResult> => {
+          try {
+            const entry = await entryService.recordWeighIn(
+              id,
+              request.authUser.academyId,
+              eid,
+              parsed.data.weightKg,
+              ctxFrom(request),
+            )
+            return { statusCode: 200, body: entry }
+          } catch (err) {
+            if (err instanceof EventEntryServiceError) {
+              return { statusCode: err.statusCode, body: { error: err.message } }
+            }
+            throw err
+          }
+        },
+      })
     },
   )
 

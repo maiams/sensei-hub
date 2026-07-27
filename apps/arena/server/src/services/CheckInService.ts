@@ -5,6 +5,7 @@ import { AthleteModel } from '../repositories/AthleteModel.js'
 import { EventEntryModel } from '../repositories/EventEntryModel.js'
 import { AuditLogModel } from '@sensei-hub/core-server'
 import { EventEntryService } from './EventEntryService.js'
+import { resolveOccurredAt, parseOccurredAtOrUndefined } from '../domain/offlineWrite.js'
 import type { AuthCtx } from '@sensei-hub/core-server'
 import type { AttendanceDTO, CheckInMethod } from '@arena/shared'
 
@@ -37,7 +38,11 @@ export class CheckInService {
         academyId,
         method,
         operatorId: ctx.userId,
-        checkedInAt: new Date(),
+        // The business fact "when did the athlete actually check in" —
+        // preserved from the offline queue's own timestamp when this
+        // request was replayed late; server-receipt time lives separately
+        // on the AuditLog entry below, which is always "now".
+        checkedInAt: resolveOccurredAt(ctx.occurredAt),
         status: 'active',
       })
     } catch (err) {
@@ -68,6 +73,7 @@ export class CheckInService {
     attendance.entriesUpdated = entriesUpdated
     await attendance.save()
 
+    const checkInOccurredAt = parseOccurredAtOrUndefined(ctx.occurredAt)
     await AuditLogModel.create({
       userId: ctx.userId,
       entityType: 'Attendance',
@@ -77,6 +83,11 @@ export class CheckInService {
       newValue: method,
       sessionId: ctx.sessionId,
       ip: ctx.ip,
+      // Set only when this check-in came off the offline queue (replayed
+      // after a connectivity gap) — see AuthCtx's doc comment.
+      ...(checkInOccurredAt ? { occurredAt: checkInOccurredAt } : {}),
+      ...(ctx.stationId !== undefined ? { stationId: ctx.stationId } : {}),
+      ...(ctx.clientSeq !== undefined ? { clientSeq: ctx.clientSeq } : {}),
     })
 
     return this.#toDTO(attendance)

@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events'
+import type { HydratedDocument } from 'mongoose'
 import { ScoreboardModel, type ScoreboardDocument, type ScoreboardSideSub } from '../repositories/ScoreboardModel.js'
 import { MatchModel } from '../repositories/MatchModel.js'
 import { AreaModel } from '../repositories/AreaModel.js'
@@ -99,7 +100,7 @@ export class ScoreboardService {
     if (!scoreboard.clock.running) {
       scoreboard.clock.running = true
       scoreboard.clock.lastStartedAt = new Date()
-      await scoreboard.save()
+      await this.#save(scoreboard)
       this.#broadcast(scoreboard)
     }
     void ctx
@@ -109,7 +110,7 @@ export class ScoreboardService {
   async pauseClock(scoreboardId: string, academyId: string, ctx: AuthCtx) {
     const scoreboard = await this.#findActive(scoreboardId, academyId)
     this.#freezeClock(scoreboard)
-    await scoreboard.save()
+    await this.#save(scoreboard)
     this.#broadcast(scoreboard)
     void ctx
     return this.#toDTO(scoreboard, 'operator')
@@ -122,7 +123,7 @@ export class ScoreboardService {
     scoreboard.clock.clockMs = clockMs
     scoreboard.clock.running = false
     scoreboard.clock.lastStartedAt = null
-    await scoreboard.save()
+    await this.#save(scoreboard)
 
     await AuditLogModel.create({
       userId: ctx.userId,
@@ -145,7 +146,7 @@ export class ScoreboardService {
     const scoreboard = await this.#findActive(scoreboardId, academyId)
     this.#applyToSide(scoreboard, side, (s) => applyScore(s, type))
     this.#afterScoringChange(scoreboard)
-    await scoreboard.save()
+    await this.#save(scoreboard)
 
     await AuditLogModel.create({
       userId: ctx.userId,
@@ -173,7 +174,7 @@ export class ScoreboardService {
   ) {
     const scoreboard = await this.#findActive(scoreboardId, academyId)
     this.#applyToSide(scoreboard, side, (s) => removeScore(s, type))
-    await scoreboard.save()
+    await this.#save(scoreboard)
 
     await AuditLogModel.create({
       userId: ctx.userId,
@@ -195,7 +196,7 @@ export class ScoreboardService {
     const scoreboard = await this.#findActive(scoreboardId, academyId)
     if (scoreboard.osaekomi) throw new ScoreboardServiceError('Osaekomi already running', 409)
     scoreboard.osaekomi = { holder, startedAt: new Date() }
-    await scoreboard.save()
+    await this.#save(scoreboard)
     this.#broadcast(scoreboard)
     void ctx
     return this.#toDTO(scoreboard, 'operator')
@@ -215,7 +216,7 @@ export class ScoreboardService {
       this.#applyToSide(scoreboard, holder, (s) => applyScore(s, award))
       this.#afterScoringChange(scoreboard)
     }
-    await scoreboard.save()
+    await this.#save(scoreboard)
 
     await AuditLogModel.create({
       userId: ctx.userId,
@@ -250,7 +251,7 @@ export class ScoreboardService {
         ? { clockMs: 0, running: false, lastStartedAt: null, countsUp: true }
         : { clockMs: limit * 1000, running: false, lastStartedAt: null, countsUp: false }
     scoreboard.osaekomi = null
-    await scoreboard.save()
+    await this.#save(scoreboard)
 
     await AuditLogModel.create({
       userId: ctx.userId,
@@ -297,7 +298,7 @@ export class ScoreboardService {
     scoreboard.osaekomi = null
     scoreboard.status = 'completed'
     scoreboard.winner = { athleteId: scoreboard.sides.A.athleteId.toString() === winnerId ? scoreboard.sides.A.athleteId : scoreboard.sides.B.athleteId, method }
-    await scoreboard.save()
+    await this.#save(scoreboard)
 
     this.#broadcast(scoreboard)
     return this.#toDTO(scoreboard, 'operator')
@@ -312,7 +313,7 @@ export class ScoreboardService {
     scoreboard.osaekomi = null
     scoreboard.status = 'aborted'
     scoreboard.abortReason = reason
-    await scoreboard.save()
+    await this.#save(scoreboard)
 
     await MatchModel.updateOne({ _id: scoreboard.matchId, result: null }, { $set: { areaId: null } })
 
@@ -387,6 +388,28 @@ export class ScoreboardService {
     if (endsFight(scoreboard.sides.A, scoreboard.sides.B, scoreboard.phase)) {
       this.#freezeClock(scoreboard)
       scoreboard.osaekomi = null
+    }
+  }
+
+  // Every mutation goes through here instead of a bare `scoreboard.save()`
+  // — see ScoreboardModel's `optimisticConcurrency: true`. Two requests
+  // racing on the same live scoreboard (e.g. a late "waza-ari" landing at
+  // the same instant as "declare winner") can both read the pre-mutation
+  // document before either writes; the loser's save() now throws a
+  // VersionError instead of silently applying a stale mutation on top of a
+  // decision that already happened. Surfaced as a 409 the operator can
+  // retry — never a silent corruption, never a crash.
+  async #save(scoreboard: HydratedDocument<ScoreboardDocument>): Promise<void> {
+    try {
+      await scoreboard.save()
+    } catch (err) {
+      if (err instanceof Error && err.name === 'VersionError') {
+        throw new ScoreboardServiceError(
+          'O placar foi alterado por outra operação ao mesmo tempo — recarregue e tente novamente.',
+          409,
+        )
+      }
+      throw err
     }
   }
 
