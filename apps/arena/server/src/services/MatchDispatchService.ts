@@ -3,6 +3,8 @@ import { BracketModel } from '../repositories/BracketModel.js'
 import { MatchModel, type MatchDocument } from '../repositories/MatchModel.js'
 import { ScoreboardModel } from '../repositories/ScoreboardModel.js'
 import { EventModel } from '../repositories/EventModel.js'
+import { AthleteModel } from '../repositories/AthleteModel.js'
+import { DivisionModel } from '../repositories/DivisionModel.js'
 import { AuditLogModel } from '@sensei-hub/core-server'
 import type { EventCtx } from './EventService.js'
 
@@ -127,13 +129,26 @@ export class MatchDispatchService {
           sessionId: ctx.sessionId,
           ip: ctx.ip,
         })
+        const athleteAId = claimed.athleteAId?.toString() as string
+        const athleteBId = claimed.athleteBId?.toString() as string
+        const divisionId = claimed.divisionId.toString()
+        // The operate screen (scoreboard_operator) needs names to label this
+        // fight but must not be handed the whole athlete registry — so we
+        // embed just these two athletes + this one division here instead of
+        // requiring a separate /athletes or /divisions list call.
+        const names = await this.#namesFor(divisionId, athleteAId, athleteBId)
         return {
           match: {
             id: claimed._id.toString(),
             matchNumber: claimed.matchNumber,
-            divisionId: claimed.divisionId.toString(),
-            athleteAId: claimed.athleteAId?.toString() as string,
-            athleteBId: claimed.athleteBId?.toString() as string,
+            divisionId,
+            divisionName: names.divisionName,
+            athleteAId,
+            athleteBId,
+            athleteADisplayName: names.athleteA?.displayName ?? null,
+            athleteAClubName: names.athleteA?.clubName ?? null,
+            athleteBDisplayName: names.athleteB?.displayName ?? null,
+            athleteBClubName: names.athleteB?.clubName ?? null,
           },
         }
       }
@@ -231,6 +246,27 @@ export class MatchDispatchService {
         athleteAId: claimed.athleteAId?.toString() as string,
         athleteBId: claimed.athleteBId?.toString() as string,
       },
+    }
+  }
+
+  // Looks up exactly the two athletes + one division a dispatched match
+  // needs for display — never the full registry — so scoreboard_operator
+  // routes can stay authorized without also granting /athletes or
+  // /events/:id/divisions/list-scale access.
+  async #namesFor(divisionId: string, athleteAId: string, athleteBId: string) {
+    const [division, athleteA, athleteB] = await Promise.all([
+      DivisionModel.findById(divisionId),
+      AthleteModel.findById(athleteAId),
+      AthleteModel.findById(athleteBId),
+    ])
+    return {
+      divisionName: division?.name ?? null,
+      athleteA: athleteA
+        ? { displayName: athleteA.preferredName || athleteA.fullName, clubName: athleteA.clubName ?? null }
+        : null,
+      athleteB: athleteB
+        ? { displayName: athleteB.preferredName || athleteB.fullName, clubName: athleteB.clubName ?? null }
+        : null,
     }
   }
 

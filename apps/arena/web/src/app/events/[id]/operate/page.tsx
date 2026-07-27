@@ -20,19 +20,23 @@ interface AreaDTO {
   status: 'open' | 'closed'
 }
 
-interface DivisionDTO {
-  id: string
-  name: string
-}
-
-interface AthleteListItem {
-  id: string
-  fullName: string
-  preferredName?: string
-}
-
+// Names come embedded in the dispatch response (see MatchDispatchService.#namesFor
+// on the server) — this screen must not download the whole athlete registry
+// just to label a fight (data minimization; also avoids the old silent
+// pageSize cap that made check-in/print stop finding people past N athletes).
 interface NextMatchDTO {
-  match: { id: string; matchNumber: number; divisionId: string; athleteAId: string; athleteBId: string } | null
+  match: {
+    id: string
+    matchNumber: number
+    divisionId: string
+    divisionName: string | null
+    athleteAId: string
+    athleteBId: string
+    athleteADisplayName: string | null
+    athleteAClubName: string | null
+    athleteBDisplayName: string | null
+    athleteBClubName: string | null
+  } | null
 }
 
 export default function OperateAreaPage() {
@@ -42,8 +46,6 @@ export default function OperateAreaPage() {
   const online = useOnlineStatus()
 
   const [areas, setAreas] = useState<AreaDTO[] | null>(null)
-  const [divisions, setDivisions] = useState<DivisionDTO[]>([])
-  const [athletes, setAthletes] = useState<Record<string, AthleteListItem>>({})
   const [selectedAreaId, setSelectedAreaId] = useState<string | null>(null)
   const [nextMatch, setNextMatch] = useState<NextMatchDTO['match'] | 'unasked'>('unasked')
   const [scoreboard, setScoreboard] = useState<ScoreboardDTO | null>(null)
@@ -52,18 +54,12 @@ export default function OperateAreaPage() {
 
   const load = useCallback(async () => {
     try {
-      const [areasData, divisionsData, athletesData] = await Promise.all([
-        apiFetch<AreaDTO[]>(`/events/${eventId}/areas`),
-        apiFetch<DivisionDTO[]>(`/events/${eventId}/divisions`),
-        apiFetch<{ items: AthleteListItem[] }>('/athletes?pageSize=200'),
-      ])
+      const areasData = await apiFetch<AreaDTO[]>(`/events/${eventId}/areas`)
       setAreas(areasData)
-      setDivisions(divisionsData)
-      const map: Record<string, AthleteListItem> = {}
-      for (const a of athletesData.items) map[a.id] = a
-      setAthletes(map)
-    } catch {
-      setError('Não foi possível carregar as áreas.')
+    } catch (err) {
+      setError(
+        err instanceof ApiError ? translateApiError(err.message) : 'Não foi possível carregar as áreas desta mesa.',
+      )
     }
   }, [eventId])
 
@@ -74,16 +70,6 @@ export default function OperateAreaPage() {
     }
     void load()
   }, [router, load])
-
-  function athleteName(id: string): string {
-    const a = athletes[id]
-    if (!a) return id
-    return a.preferredName || a.fullName
-  }
-
-  function divisionName(id: string): string {
-    return divisions.find((d) => d.id === id)?.name ?? id
-  }
 
   async function handleAskNext() {
     if (!selectedAreaId) return
@@ -235,10 +221,19 @@ export default function OperateAreaPage() {
             )}
             {nextMatch && nextMatch !== 'unasked' && (
               <div className="mb-4 rounded-lg border border-blue-800 bg-blue-950/40 p-4">
-                <p className="text-xs uppercase tracking-wide text-blue-300">{divisionName(nextMatch.divisionId)}</p>
+                <p className="text-xs uppercase tracking-wide text-blue-300">
+                  {nextMatch.divisionName ?? nextMatch.divisionId}
+                </p>
                 <p className="mt-1 text-lg font-semibold text-white">
-                  {athleteName(nextMatch.athleteAId)} <span className="text-slate-500">vs</span>{' '}
-                  {athleteName(nextMatch.athleteBId)}
+                  {nextMatch.athleteADisplayName ?? nextMatch.athleteAId}
+                  {nextMatch.athleteAClubName && (
+                    <span className="ml-1 text-sm font-normal text-slate-400">({nextMatch.athleteAClubName})</span>
+                  )}{' '}
+                  <span className="text-slate-500">vs</span>{' '}
+                  {nextMatch.athleteBDisplayName ?? nextMatch.athleteBId}
+                  {nextMatch.athleteBClubName && (
+                    <span className="ml-1 text-sm font-normal text-slate-400">({nextMatch.athleteBClubName})</span>
+                  )}
                 </p>
                 <p className="mt-1 text-xs text-slate-500">Luta #{nextMatch.matchNumber}</p>
                 <button

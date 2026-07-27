@@ -26,6 +26,11 @@ const VALID_TRANSITIONS: Record<EventEntryStatus, EventEntryStatus[]> = {
 export class EventEntryService {
   #weightService = new WeightService()
 
+  // weigh_in_operator reads this list too (see routes/events.ts) to run its
+  // queue, so the DTO carries the athlete's display name — nothing else from
+  // the athlete registry (no CPF/phone/guardian/medical). Batched into one
+  // query, scoped to the event's own academy, so the operator can never see
+  // names for athletes outside this event's roster.
   async listEntries(
     eventId: string,
     academyId: string,
@@ -36,7 +41,12 @@ export class EventEntryService {
     if (filters.divisionId) query['divisionId'] = filters.divisionId
     if (filters.status) query['status'] = filters.status
     const entries = await EventEntryModel.find(query).sort({ createdAt: 1 })
-    return entries.map((e) => this.#toDTO(e))
+
+    const athleteIds = [...new Set(entries.map((e) => e.athleteId.toString()))]
+    const athletes = await AthleteModel.find({ _id: { $in: athleteIds }, academyId }).select('fullName preferredName')
+    const nameById = new Map(athletes.map((a) => [a._id.toString(), a.preferredName || a.fullName]))
+
+    return entries.map((e) => this.#toDTO(e, nameById.get(e.athleteId.toString())))
   }
 
   async createManualEntry(eventId: string, academyId: string, input: CreateEventEntryInput, ctx: AuthCtx) {
@@ -283,13 +293,14 @@ export class EventEntryService {
     return typeof err === 'object' && err !== null && 'code' in err && (err as { code: unknown }).code === 11000
   }
 
-  #toDTO(entry: EventEntryDocument) {
+  #toDTO(entry: EventEntryDocument, athleteName?: string) {
     return {
       id: entry._id.toString(),
       eventId: entry.eventId.toString(),
       divisionId: entry.divisionId.toString(),
       confirmedDivisionId: entry.confirmedDivisionId?.toString(),
       athleteId: entry.athleteId.toString(),
+      athleteName,
       academyId: entry.academyId.toString(),
       registrationMethod: entry.registrationMethod,
       status: entry.status,

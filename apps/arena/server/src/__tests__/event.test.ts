@@ -655,3 +655,257 @@ describe('Event entries', () => {
     expect(forbiddenConfirm.statusCode).toBe(403)
   })
 })
+
+// ─── scoreboard_operator: exactly the reads it needs to run its mat ───────
+
+describe('RBAC: scoreboard_operator can read event context, not the roster', () => {
+  it('can GET the event itself and its divisions', async () => {
+    const adminToken = await setupAdmin()
+    const event = await createEvent(adminToken)
+    await createDivision(adminToken, event.id)
+    const scoreboardToken = await createUserAndLogin(adminToken, 'scoreboard_operator', 'mesa1@test.com')
+
+    const eventRes = await app.inject({
+      method: 'GET',
+      url: `/api/events/${event.id}`,
+      headers: { authorization: `Bearer ${scoreboardToken}` },
+    })
+    expect(eventRes.statusCode).toBe(200)
+
+    const divisionsRes = await app.inject({
+      method: 'GET',
+      url: `/api/events/${event.id}/divisions`,
+      headers: { authorization: `Bearer ${scoreboardToken}` },
+    })
+    expect(divisionsRes.statusCode).toBe(200)
+    expect(divisionsRes.json<DivisionDTO[]>()).toHaveLength(1)
+  })
+
+  it('GET /events/active returns only in_progress events, never drafts', async () => {
+    const adminToken = await setupAdmin()
+    const draftEvent = await createEvent(adminToken, { name: 'Rascunho' })
+    const liveEvent = await createEvent(adminToken, { name: 'Ao Vivo' })
+    await app.inject({
+      method: 'PATCH',
+      url: `/api/events/${liveEvent.id}`,
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { status: 'in_progress' },
+    })
+    const scoreboardToken = await createUserAndLogin(adminToken, 'scoreboard_operator', 'mesa2@test.com')
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/events/active',
+      headers: { authorization: `Bearer ${scoreboardToken}` },
+    })
+    expect(res.statusCode).toBe(200)
+    const active = res.json<Array<{ id: string; name: string }>>()
+    expect(active.map((e) => e.id)).toEqual([liveEvent.id])
+    expect(active.map((e) => e.id)).not.toContain(draftEvent.id)
+  })
+
+  it('cannot list all events, read entries, or read the athlete registry', async () => {
+    const adminToken = await setupAdmin()
+    const event = await createEvent(adminToken)
+    const division = await createDivision(adminToken, event.id)
+    const athlete = await createAthlete(adminToken)
+    await app.inject({
+      method: 'POST',
+      url: `/api/events/${event.id}/entries`,
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { divisionId: division.id, athleteId: athlete.id },
+    })
+    const scoreboardToken = await createUserAndLogin(adminToken, 'scoreboard_operator', 'mesa3@test.com')
+
+    const listEvents = await app.inject({
+      method: 'GET',
+      url: '/api/events',
+      headers: { authorization: `Bearer ${scoreboardToken}` },
+    })
+    expect(listEvents.statusCode).toBe(403)
+
+    const entries = await app.inject({
+      method: 'GET',
+      url: `/api/events/${event.id}/entries`,
+      headers: { authorization: `Bearer ${scoreboardToken}` },
+    })
+    expect(entries.statusCode).toBe(403)
+
+    const athletes = await app.inject({
+      method: 'GET',
+      url: '/api/athletes',
+      headers: { authorization: `Bearer ${scoreboardToken}` },
+    })
+    expect(athletes.statusCode).toBe(403)
+
+    const users = await app.inject({
+      method: 'GET',
+      url: '/api/users',
+      headers: { authorization: `Bearer ${scoreboardToken}` },
+    })
+    expect(users.statusCode).toBe(403)
+
+    const createUser = await app.inject({
+      method: 'POST',
+      url: '/api/users',
+      headers: { authorization: `Bearer ${scoreboardToken}` },
+      payload: { name: 'Invasor', email: 'invasor@test.com', password: 'senha12345', role: 'scoreboard_operator' },
+    })
+    expect(createUser.statusCode).toBe(403)
+  })
+})
+
+// ─── weigh_in_operator: full weigh-in station, never the athlete registry ──
+
+describe('RBAC: weigh_in_operator can run the weigh-in station end to end', () => {
+  it('can read event context, divisions, and its event roster with a name (but no CPF/phone/guardian data)', async () => {
+    const adminToken = await setupAdmin()
+    const event = await createEvent(adminToken)
+    const division = await createDivision(adminToken, event.id)
+    const athlete = await createAthlete(adminToken, { cpf: '11144477735', phone: '11999990000' })
+    await app.inject({
+      method: 'POST',
+      url: `/api/events/${event.id}/entries`,
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: { divisionId: division.id, athleteId: athlete.id },
+    })
+    const weighInToken = await createUserAndLogin(adminToken, 'weigh_in_operator', 'pesagem1@test.com')
+
+    const eventRes = await app.inject({
+      method: 'GET',
+      url: `/api/events/${event.id}`,
+      headers: { authorization: `Bearer ${weighInToken}` },
+    })
+    expect(eventRes.statusCode).toBe(200)
+
+    const divisionsRes = await app.inject({
+      method: 'GET',
+      url: `/api/events/${event.id}/divisions`,
+      headers: { authorization: `Bearer ${weighInToken}` },
+    })
+    expect(divisionsRes.statusCode).toBe(200)
+
+    const entriesRes = await app.inject({
+      method: 'GET',
+      url: `/api/events/${event.id}/entries`,
+      headers: { authorization: `Bearer ${weighInToken}` },
+    })
+    expect(entriesRes.statusCode).toBe(200)
+    const entries = entriesRes.json<Array<EntryDTO & { athleteName?: string }>>()
+    expect(entries).toHaveLength(1)
+    expect(entries[0]?.athleteName).toBe('Ricardo Santos')
+    // The lean entry DTO never carries the athlete registry's sensitive fields
+    expect(entries[0]).not.toHaveProperty('cpf')
+    expect(entries[0]).not.toHaveProperty('phone')
+    expect(entries[0]).not.toHaveProperty('guardianName')
+    expect(JSON.stringify(entries[0])).not.toContain('11144477735')
+  })
+
+  it('can record a weigh-in and confirm the resulting division', async () => {
+    const adminToken = await setupAdmin()
+    const event = await createEvent(adminToken)
+    const division = await createDivision(adminToken, event.id)
+    const athlete = await createAthlete(adminToken)
+    const entry = (
+      await app.inject({
+        method: 'POST',
+        url: `/api/events/${event.id}/entries`,
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: { divisionId: division.id, athleteId: athlete.id },
+      })
+    ).json<EntryDTO>()
+    await app.inject({
+      method: 'PATCH',
+      url: `/api/events/${event.id}/entries/${entry.id}/checkin`,
+      headers: { authorization: `Bearer ${adminToken}` },
+    })
+    const weighInToken = await createUserAndLogin(adminToken, 'weigh_in_operator', 'pesagem2@test.com')
+
+    const weighed = await app.inject({
+      method: 'PATCH',
+      url: `/api/events/${event.id}/entries/${entry.id}/weighin`,
+      headers: { authorization: `Bearer ${weighInToken}` },
+      payload: { weightKg: 89.5 },
+    })
+    expect(weighed.statusCode).toBe(200)
+    expect(weighed.json<EntryDTO>().status).toBe('weighed_in')
+
+    const confirmed = await app.inject({
+      method: 'PATCH',
+      url: `/api/events/${event.id}/entries/${entry.id}/confirm`,
+      headers: { authorization: `Bearer ${weighInToken}` },
+      payload: {},
+    })
+    expect(confirmed.statusCode).toBe(200)
+    expect(confirmed.json<EntryDTO>().status).toBe('confirmed')
+  })
+
+  it('cannot read the athlete registry, manage users, or manage the event/divisions/bracket', async () => {
+    const adminToken = await setupAdmin()
+    const event = await createEvent(adminToken)
+    const division = await createDivision(adminToken, event.id)
+    await createAthlete(adminToken)
+    const weighInToken = await createUserAndLogin(adminToken, 'weigh_in_operator', 'pesagem3@test.com')
+
+    const athletes = await app.inject({
+      method: 'GET',
+      url: '/api/athletes',
+      headers: { authorization: `Bearer ${weighInToken}` },
+    })
+    expect(athletes.statusCode).toBe(403)
+
+    const users = await app.inject({
+      method: 'GET',
+      url: '/api/users',
+      headers: { authorization: `Bearer ${weighInToken}` },
+    })
+    expect(users.statusCode).toBe(403)
+
+    const createUser = await app.inject({
+      method: 'POST',
+      url: '/api/users',
+      headers: { authorization: `Bearer ${weighInToken}` },
+      payload: { name: 'Invasor', email: 'invasor2@test.com', password: 'senha12345', role: 'weigh_in_operator' },
+    })
+    expect(createUser.statusCode).toBe(403)
+
+    const listEvents = await app.inject({
+      method: 'GET',
+      url: '/api/events',
+      headers: { authorization: `Bearer ${weighInToken}` },
+    })
+    expect(listEvents.statusCode).toBe(403)
+
+    const createEventRes = await app.inject({
+      method: 'POST',
+      url: '/api/events',
+      headers: { authorization: `Bearer ${weighInToken}` },
+      payload: { name: 'Invasão', eventDate: '2026-08-01' },
+    })
+    expect(createEventRes.statusCode).toBe(403)
+
+    const updateEvent = await app.inject({
+      method: 'PATCH',
+      url: `/api/events/${event.id}`,
+      headers: { authorization: `Bearer ${weighInToken}` },
+      payload: { status: 'in_progress' },
+    })
+    expect(updateEvent.statusCode).toBe(403)
+
+    const createDivisionRes = await app.inject({
+      method: 'POST',
+      url: `/api/events/${event.id}/divisions`,
+      headers: { authorization: `Bearer ${weighInToken}` },
+      payload: { name: 'Categoria Invasora', weightLimitKg: 100 },
+    })
+    expect(createDivisionRes.statusCode).toBe(403)
+
+    const generateBracket = await app.inject({
+      method: 'POST',
+      url: `/api/events/${event.id}/divisions/${division.id}/bracket`,
+      headers: { authorization: `Bearer ${weighInToken}` },
+      payload: {},
+    })
+    expect(generateBracket.statusCode).toBe(403)
+  })
+})

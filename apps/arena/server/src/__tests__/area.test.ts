@@ -45,7 +45,18 @@ interface MatchDTO {
   result: { winnerId: string; isWalkover: boolean; decidedAt?: string } | null
 }
 interface NextMatchDTO {
-  match: { id: string; matchNumber: number; divisionId: string; athleteAId: string; athleteBId: string } | null
+  match: {
+    id: string
+    matchNumber: number
+    divisionId: string
+    divisionName: string | null
+    athleteAId: string
+    athleteBId: string
+    athleteADisplayName: string | null
+    athleteAClubName: string | null
+    athleteBDisplayName: string | null
+    athleteBClubName: string | null
+  } | null
 }
 interface UnroutableMatchDTO {
   id: string
@@ -379,6 +390,26 @@ describe('POST /api/events/:id/areas/:aid/next-match', () => {
     const match = res.json<NextMatchDTO>().match
     expect(match).not.toBeNull()
     expect(match?.divisionId).toBe(divisionB.id)
+  })
+
+  // scoreboard_operator can't read /athletes or /events/:id/divisions'-worth
+  // of the roster, so the operate screen needs these names embedded right
+  // here — see MatchDispatchService#namesFor. This guards that contract.
+  it('embeds the division name and both athletes\' display/club names, not just their ids', async () => {
+    const token = await setupAdmin()
+    const event = await createEvent(token)
+    const division = await createDivision(token, event.id, { name: 'Sub-18 Masculino -73kg' })
+    for (let i = 0; i < 2; i++) await confirmedEntry(token, event.id, division.id)
+    await generateBracket(token, event.id, division.id, { format: 'elimination', seed: 7 })
+    const area = await createArea(token, event.id)
+
+    const res = await nextMatch(token, event.id, area.id)
+    expect(res.statusCode).toBe(200)
+    const match = res.json<NextMatchDTO>().match
+    expect(match).not.toBeNull()
+    expect(match?.divisionName).toBe('Sub-18 Masculino -73kg')
+    expect(match?.athleteADisplayName).toMatch(/^Atleta \d+$/)
+    expect(match?.athleteBDisplayName).toMatch(/^Atleta \d+$/)
   })
 
   it('returns { match: null } when the area is idle with nothing eligible, not an error', async () => {

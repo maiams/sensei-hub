@@ -152,6 +152,10 @@ export const EventEntrySchema = z.object({
   divisionId: z.string(),
   confirmedDivisionId: z.string().optional(),
   athleteId: z.string(),
+  // Resolved server-side (name only — no CPF/phone/guardian) so low-privilege
+  // roles like weigh_in_operator, who can read entries but not the athlete
+  // registry, still get a display name. See EventEntryService#listEntries.
+  athleteName: z.string().optional(),
   academyId: z.string(),
   registrationMethod: RegistrationMethod,
   importJobId: z.string().optional(),

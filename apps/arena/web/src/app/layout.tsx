@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next'
 import './globals.css'
 import { ServiceWorkerRegister } from '../components/ServiceWorkerRegister'
 import { SyncStatusBadge } from '../components/SyncStatusBadge'
+import { AppHeader } from '../components/AppHeader'
 
 export const metadata: Metadata = {
   title: 'Sensei Arena',
@@ -19,6 +20,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="pt-BR">
       <body>
         <ServiceWorkerRegister />
+        <AppHeader />
         {children}
         <SyncStatusBadge />
       </body>

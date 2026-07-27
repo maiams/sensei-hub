@@ -19,14 +19,18 @@ export const EVENT_STATUS_LABELS: Record<string, string> = {
 
 export const EVENT_STATUS_OPTIONS = Object.entries(EVENT_STATUS_LABELS).map(([value, label]) => ({ value, label }))
 
+// Phrased as noun-phrases describing the status of the *inscrição* (entry)
+// rather than adjectives agreeing with the athlete's gender — "Inscrita"/
+// "Confirmada" read as if describing the person and were wrong for male
+// athletes; "Inscrição feita"/"Confirmação feita" are gender-neutral.
 export const EVENT_ENTRY_STATUS_LABELS: Record<string, string> = {
-  incomplete: 'Incompleta',
-  registered: 'Inscrita',
+  incomplete: 'Cadastro incompleto',
+  registered: 'Inscrição feita',
   checked_in: 'Check-in feito',
-  weighed_in: 'Pesada',
-  confirmed: 'Confirmada',
-  disqualified: 'Desclassificada',
-  withdrawn: 'Retirada',
+  weighed_in: 'Pesagem feita',
+  confirmed: 'Confirmação feita',
+  disqualified: 'Desclassificação registrada',
+  withdrawn: 'Retirada registrada',
 }
 
 export const OVERWEIGHT_POLICY_LABELS: Record<string, string> = {
@@ -38,6 +42,24 @@ export const OVERWEIGHT_POLICY_OPTIONS = Object.entries(OVERWEIGHT_POLICY_LABELS
   value,
   label,
 }))
+
+export const USER_ROLE_LABELS: Record<string, string> = {
+  super_admin: 'Super admin',
+  academy_admin: 'Admin da academia',
+  event_manager: 'Gestor do evento',
+  coach: 'Treinador',
+  staff: 'Equipe/recepção',
+  weigh_in_operator: 'Operador de pesagem',
+  scoreboard_operator: 'Mesário/placar',
+  athlete: 'Atleta',
+  guardian: 'Responsável',
+}
+
+// Roles an academy_admin can hand out from the Arena's user-management screen.
+// Deliberately excludes super_admin/academy_admin (elevated — not meant to be
+// self-service here) and athlete/guardian (not Arena staff accounts; those
+// come from the Dojô/event entries, not this screen).
+export const ARENA_ASSIGNABLE_ROLES = ['event_manager', 'staff', 'weigh_in_operator', 'scoreboard_operator'] as const
 
 const ARENA_API_ERROR_TRANSLATIONS: Record<string, string> = {
   'Invalid CPF': 'CPF inválido',
@@ -56,6 +78,7 @@ const ARENA_API_ERROR_TRANSLATIONS: Record<string, string> = {
   'No active bracket for this division': 'Nenhuma chave ativa para esta divisão',
   'A bracket already exists for this division — pass force to regenerate': 'Já existe uma chave ativa para esta divisão',
   'No confirmed entries in this division': 'Não há inscrições confirmadas nesta divisão',
+  'At least 2 athletes are required': 'É preciso pelo menos 2 atletas confirmadas para gerar a chave',
   'Match already has a result — use the correction endpoint': 'Esta luta já tem resultado — use a correção',
   'Match has no result yet — use the result endpoint': 'Esta luta ainda não tem resultado',
   'Cannot correct: a subsequent match already has a recorded result for an athlete from this match':
@@ -90,6 +113,9 @@ const ARENA_API_ERROR_TRANSLATIONS: Record<string, string> = {
   'Athlete already checked in for this event': 'Esta atleta já fez check-in neste evento',
   'Attendance not found': 'Registro de check-in não encontrado',
   'Check-in already undone': 'Este check-in já foi desfeito',
+  // Users
+  'Email already in use': 'Este e-mail já está cadastrado',
+  'Cannot assign a role higher than your own': 'Você não pode atribuir um papel maior que o seu',
 }
 
 export const translateApiError = createApiErrorTranslator(ARENA_API_ERROR_TRANSLATIONS, [
@@ -103,5 +129,15 @@ export const translateApiError = createApiErrorTranslator(ARENA_API_ERROR_TRANSL
     const m = message.match(/^Athlete still resting for (\d+)s — retry with ignoreRest to override$/)
     if (!m) return null
     return `Atleta ainda em descanso por ${m[1]}s — force novamente ignorando o descanso, se necessário`
+  },
+  (message) => {
+    const m = message.match(/^Rodízio only supports 3–6 athletes \(got (\d+)\)$/)
+    if (!m) return null
+    return `O rodízio só aceita de 3 a 6 atletas confirmadas (esta divisão tem ${m[1]})`
+  },
+  (message) => {
+    const m = message.match(/^(\d+) athletes do not fit in a Chave-(\d+)$/)
+    if (!m) return null
+    return `${m[1]} atletas não cabem numa chave de ${m[2]}`
   },
 ])

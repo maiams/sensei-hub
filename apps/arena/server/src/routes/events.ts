@@ -65,7 +65,21 @@ export async function eventRoutes(app: FastifyInstance): Promise<void> {
     return reply.send(events)
   })
 
-  app.get('/events/:id', { preHandler: [authenticate, authorize('staff')] }, async (request, reply) => {
+  // Post-login landing for scoreboard_operator/weigh_in_operator: they need
+  // to know which event is currently running so the app can take them
+  // straight to their screen (table operation / weigh-in), but must not see
+  // the full event registry (drafts, cancelled, past events). This filters
+  // server-side down to {id, name} of only 'in_progress' events.
+  app.get('/events/active', { preHandler: [authenticate, authorize('scoreboard_operator')] }, async (request, reply) => {
+    const events = await eventService.listEvents(request.authUser.academyId)
+    const active = events.filter((e) => e.status === 'in_progress').map((e) => ({ id: e.id, name: e.name }))
+    return reply.send(active)
+  })
+
+  // scoreboard_operator can read the event itself (name/status/rules) — it
+  // needs this to operate its mat. Nothing entry/athlete-related is exposed
+  // by this route, so this doesn't leak registration or personal data.
+  app.get('/events/:id', { preHandler: [authenticate, authorize('scoreboard_operator')] }, async (request, reply) => {
     const { id } = request.params as { id: string }
     try {
       const event = await eventService.getEvent(id, request.authUser.academyId)
@@ -127,9 +141,12 @@ export async function eventRoutes(app: FastifyInstance): Promise<void> {
     },
   )
 
+  // scoreboard_operator needs the division name to label the fight it's
+  // running (e.g. "Sub-18 Masculino -73kg"). Divisions carry only
+  // category/weight setup, no athlete or entry data, so this is safe to open.
   app.get(
     '/events/:id/divisions',
-    { preHandler: [authenticate, authorize('staff')] },
+    { preHandler: [authenticate, authorize('scoreboard_operator')] },
     async (request, reply) => {
       const { id } = request.params as { id: string }
       try {
@@ -175,19 +192,27 @@ export async function eventRoutes(app: FastifyInstance): Promise<void> {
 
   // ─── Entries ─────────────────────────────────────────────────────────────
 
-  app.get('/events/:id/entries', { preHandler: [authenticate, authorize('staff')] }, async (request, reply) => {
-    const { id } = request.params as { id: string }
-    const parsed = ListEntriesQuery.safeParse(request.query)
-    if (!parsed.success) {
-      return reply.status(400).send({ error: 'Validation failed', details: parsed.error.flatten() })
-    }
-    try {
-      const entries = await entryService.listEntries(id, request.authUser.academyId, parsed.data)
-      return reply.send(entries)
-    } catch (err) {
-      return handleError(err, reply)
-    }
-  })
+  // weigh_in_operator needs its event's roster to run the weigh-in queue
+  // (name + division + declared/confirmed weight — see EventEntryService
+  // #toDTO, which resolves only the athlete's name, never CPF/phone/guardian).
+  // staff/event_manager+ keep full access as before.
+  app.get(
+    '/events/:id/entries',
+    { preHandler: [authenticate, authorize('staff', { alsoAllow: ['weigh_in_operator'] })] },
+    async (request, reply) => {
+      const { id } = request.params as { id: string }
+      const parsed = ListEntriesQuery.safeParse(request.query)
+      if (!parsed.success) {
+        return reply.status(400).send({ error: 'Validation failed', details: parsed.error.flatten() })
+      }
+      try {
+        const entries = await entryService.listEntries(id, request.authUser.academyId, parsed.data)
+        return reply.send(entries)
+      } catch (err) {
+        return handleError(err, reply)
+      }
+    },
+  )
 
   app.post('/events/:id/entries', { preHandler: [authenticate, authorize('staff')] }, async (request, reply) => {
     const { id } = request.params as { id: string }
@@ -235,9 +260,15 @@ export async function eventRoutes(app: FastifyInstance): Promise<void> {
     },
   )
 
+  // confirmEntry is the weigh-in operator's own next step right after
+  // recordWeighIn (picking/accepting the division post-weigh-in, including
+  // after an automatic reallocation) — so weigh_in_operator gets an explicit
+  // exception here, on top of the default event_manager+ requirement. staff
+  // and coach, despite sitting between the two roles in the hierarchy, stay
+  // forbidden.
   app.patch(
     '/events/:id/entries/:eid/confirm',
-    { preHandler: [authenticate, authorize('event_manager')] },
+    { preHandler: [authenticate, authorize('event_manager', { alsoAllow: ['weigh_in_operator'] })] },
     async (request, reply) => {
       const { id, eid } = request.params as { id: string; eid: string }
       const parsed = ConfirmEntryInput.safeParse(request.body ?? {})
