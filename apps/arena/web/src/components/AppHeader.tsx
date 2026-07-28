@@ -62,6 +62,9 @@ export function AppHeader() {
   if (role && hasMinRole(role as UserRole, 'academy_admin')) {
     links.push({ href: '/settings/users', label: 'Usuários' })
   }
+  if (role && hasMinRole(role as UserRole, 'event_manager')) {
+    links.push({ href: '/settings/cluster', label: 'Cluster' })
+  }
 
   return (
     <header className="border-b border-slate-800 bg-slate-950 px-4 py-3 text-white print:hidden">

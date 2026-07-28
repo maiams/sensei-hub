@@ -1,7 +1,8 @@
 import { createDesktopApp } from '@sensei-hub/desktop-runtime'
 
 // Sensei Arena — gestão de campeonato. Leva kiosk (placar/operate/display em
-// tela cheia + QR de LAN) e o cluster mDNS (Fase 7, opt-in via CLUSTER_ENABLED).
+// tela cheia + QR de LAN) e o cluster master/backup declarado (Fase 8, papel
+// escolhido uma vez por máquina — ver @sensei-hub/desktop-runtime/machineRole).
 createDesktopApp({
   productName: 'Sensei Arena',
   productSlug: 'arena',

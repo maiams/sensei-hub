@@ -150,7 +150,7 @@ tudo. Isso só valida numa VM/máquina Windows real ou num runner
   certos.
 - Confirmar que as regras de firewall foram criadas (`netsh advfirewall
   firewall show rule name=all | findstr Sensei`) e que **nenhum popup do
-  Firewall do Windows aparece** ao ligar o modo "Em rede" (mongod bind
+  Firewall do Windows aparece** ao declarar esta máquina como master ou backup (mongod bind
   `0.0.0.0` + o processo do app, que já escuta em `0.0.0.0` mesmo sozinho —
   ver §5).
 - Rodar o app instalado numa mesa/pesagem/telão real e confirmar que os
@@ -183,8 +183,8 @@ As regras são **por programa**, não por porta:
 
 | Regra | Programa | Por quê |
 |---|---|---|
-| `Sensei Arena` | `Sensei Arena.exe` | O servidor Fastify da Arena escuta em `0.0.0.0:3001` **sempre**, mesmo no modo "Sozinho" (`apps/arena/server/src/index.ts` — não é condicional ao modo de rede). Ele roda no mesmo processo do app principal, via `ELECTRON_RUN_AS_NODE=1` (`packages/desktop-runtime/src/supervisor.ts`), por isso a regra é no `.exe` do app, não num processo separado. |
-| `Sensei Arena (mongod)` | `resources\mongodb\mongod.exe` | Só bind em `0.0.0.0` no modo "Em rede" (`bindIp` — ver `Supervisor`), mas a regra é criada na instalação porque é o único momento em que o instalador roda elevado; o modo de rede é escolhido depois, na primeira execução (§6). |
+| `Sensei Arena` | `Sensei Arena.exe` | O servidor Fastify da Arena escuta em `0.0.0.0:3001` **sempre**, mesmo no papel "Sozinho" (`apps/arena/server/src/index.ts` — não é condicional ao papel da máquina). Ele roda no mesmo processo do app principal, via `ELECTRON_RUN_AS_NODE=1` (`packages/desktop-runtime/src/supervisor.ts`), por isso a regra é no `.exe` do app, não num processo separado. |
+| `Sensei Arena (mongod)` | `resources\mongodb\mongod.exe` | Só bind em `0.0.0.0` nos papéis "Master"/"Backup" (`bindIp` — ver `Supervisor`), mas a regra é criada na instalação porque é o único momento em que o instalador roda elevado; o papel da máquina é escolhido depois, na primeira execução (§6). |
 | `Sensei Dojo` | `Sensei Dojô.exe` (copiado para `Program Files\Sensei Dojo`) | Mesmo motivo do Arena — `apps/dojo/server/src/index.ts` também escuta em `0.0.0.0` sempre. O Dojô não tem modo cluster (`features.cluster: false`), mas o servidor Fastify liga em `0.0.0.0` de qualquer forma. |
 | `Sensei Dojo (mongod)` | `Program Files\Sensei Dojo\resources\mongodb\mongod.exe` | Defesa em profundidade — hoje o Dojô nunca liga `bindIp: '0.0.0.0'`, mas a regra evita surpresa se isso mudar. |
 
@@ -193,7 +193,7 @@ deliberada: a rede Wi-Fi de um ginásio raramente está classificada como
 "privada" de propósito, e liberar portas de banco de dados e da API numa
 rede que o Windows não considera confiável é uma exposição desnecessária.
 Se o Wi-Fi do local estiver classificado como "Pública" no Windows, o modo
-"Em rede" não vai funcionar até o operador reclassificar a rede — isso é
+"Master"/"Backup"/"Estação" não vai funcionar até o operador reclassificar a rede — isso é
 esperado, não um bug.
 
 Regras por programa (em vez de por porta) porque a porta é configurável e
@@ -201,52 +201,62 @@ pode mudar; a regra por caminho do executável cobre a porta certa
 automaticamente e é mais fácil de auditar (`netsh advfirewall firewall show
 rule name=all` mostra o nome "Sensei Arena"/"Sensei Dojo" e para quê serve).
 
-Descoberta mDNS (`multicast-dns`, UDP 5353) roda dentro do mesmo processo do
-servidor Fastify — já coberta pela regra do `.exe` do app, sem regra extra.
+A Fase 7 rodava descoberta mDNS (`multicast-dns`, UDP 5353) dentro do
+processo do servidor Fastify. A Fase 8 (master/backup declarado, ver
+`docs/status-e-plano.md`) **removeu essa descoberta por completo** — os
+papéis são declarados por um humano, não descobertos pela rede — então não
+há mais nenhuma porta UDP de mDNS a considerar aqui; as regras por programa
+acima continuam cobrindo tudo que o app de fato usa (TCP do Fastify e do
+mongod).
 
-## 6. Modo de rede — "sozinho" vs "em rede"
+## 6. Papel da máquina — "sozinho" / "master" / "backup" / "estação"
 
 O enunciado original pedia para o instalador/app perguntar se a máquina é
-"o SERVIDOR" ou "uma ESTAÇÃO". **Isso não corresponde exatamente à
-arquitetura que a Fase 7 implementou**, e acho importante deixar isso
-registrado em vez de simular uma distinção que o código não tem:
+"o SERVIDOR" ou "uma ESTAÇÃO". A Fase 7 não correspondia exatamente a isso
+(era peer-to-peer, sem papel de estação sem dados); a **Fase 8 corrige
+isso de propósito** — ver `docs/status-e-plano.md` para o desenho completo.
+O que segue já descreve o comportamento atual, não mais uma ressalva.
 
-O `ClusterManager` (Fase 7, `apps/arena/server/src/cluster/`) é **peer-to-
-peer**: toda máquina que entra no cluster mantém seu próprio `mongod` como
-membro do replica set e pode virar primary numa eleição. Não existe um papel
-de "estação" que não guarda dados — todo nó guarda uma réplica completa. A
-própria descoberta via mDNS já decide sozinha, em cada nó, se ele funda um
-replica set novo (não achou ninguém) ou entra num existente (achou peers) —
-não precisa que o operador diga qual máquina é "a principal".
+`packages/desktop-runtime/src/machineRole.ts` pergunta, uma vez por
+máquina, na primeira execução — "Como este computador vai ser usado no
+ginásio?" — com quatro opções:
 
-O que foi implementado (`packages/desktop-runtime/src/networkMode.ts`) é a
-pergunta que **de fato** corresponde ao código: um diálogo nativo, uma vez
-por máquina, na primeira execução — "Este computador vai ser usado sozinho
-ou em rede com outros computadores do ginásio?" — com duas opções:
+- **Sozinho**: `bindIp: '127.0.0.1'`, sem mongod remoto, sem cluster
+  (comportamento padrão, igual ao anterior à Fase 7).
+- **Master**: `bindIp: '0.0.0.0'`, sobe `mongod` e o inicia como único
+  membro votante do replica set. É a máquina da mesa central.
+- **Backup**: `bindIp: '0.0.0.0'`, sobe `mongod` mas não inicia nada
+  sozinho — fica esperando ser adicionado ao replica set pela tela de
+  gerenciamento do master (`/settings/cluster` no navegador, não neste
+  diálogo). Escolher "Backup" aqui só deixa a máquina pronta.
+- **Estação**: **não sobe `mongod` nenhum** — só o app. Pede, na sequência,
+  o endereço `ip:porta` do mongod do master (e, opcionalmente, do backup)
+  numa janelinha de texto própria (Electron não tem input nativo em
+  `dialog`). Esse endereço é digitado **uma única vez**; o driver do
+  MongoDB resolve sozinho para qual dos dois hosts apontar, inclusive
+  depois de uma promoção de backup — não precisa digitar de novo no meio
+  do evento.
 
-- **Sozinho**: `bindIp: '127.0.0.1'`, cluster desligado (era o
-  comportamento padrão já existente).
-- **Em rede**: `bindIp: '0.0.0.0'`, `clusterEnabled: true`. Todo computador
-  que vai participar do mesmo evento escolhe essa opção — não precisa
-  indicar qual é "o servidor".
+A resposta fica salva em `app.getPath('userData')/machine-role.json` e só é
+perguntada de novo se o operador escolher "Rede → Alterar papel deste
+computador…" no menu do app (que apaga o arquivo e reinicia). Só o Arena
+pergunta isso — o Dojô (`features.cluster: false`) sempre roda sozinho, sem
+diálogo.
 
-A resposta fica salva em
-`app.getPath('userData')/network-mode.json` e só é perguntada de novo se o
-operador escolher "Rede → Alterar modo de rede…" no menu do app (que apaga o
-arquivo e reinicia). Só o Arena pergunta isso — o Dojô
-(`features.cluster: false`) sempre roda sozinho, sem diálogo.
+`CLUSTER_ROLE=<standalone|master|backup|station>` (variável de ambiente)
+continua funcionando como bypass de desenvolvimento/CI, sem passar pelo
+diálogo — usado por `scripts/dev-run.mjs` e por testes automatizados de
+empacotamento (`CLUSTER_STATION_SEEDS`, separado por vírgula, cobre o
+`stationSeeds` do papel "Estação" nesse bypass).
 
-`CLUSTER_ENABLED=true` (variável de ambiente) continua funcionando como
-bypass de desenvolvimento/CI, sem passar pelo diálogo — usado por
-`scripts/dev-run.mjs` e por testes automatizados de empacotamento.
-
-**Não verificado**: o diálogo nativo (`dialog.showMessageBoxSync`) foi
-revisado e passa no typecheck, mas nunca foi clicado de verdade (exige uma
-janela do Electron rodando interativamente, o que não dá para automatizar
-nesta sessão). A lógica de persistência (ler/escrever o JSON) é simples o
-suficiente para não preocupar, mas o fluxo completo — diálogo → gravação →
-próxima abertura não pergunta de novo → menu "Alterar modo de rede" reabre a
-pergunta — não foi exercitado ponta a ponta.
+**Não verificado**: os diálogos nativos (`dialog.showMessageBoxSync` para a
+escolha de papel, mais a janela de texto própria para os endereços de
+estação) foram revisados e passam no typecheck, mas nunca foram clicados de
+verdade (exige uma janela do Electron rodando interativamente, o que não dá
+para automatizar nesta sessão). A lógica de persistência (ler/escrever o
+JSON) é simples o suficiente para não preocupar, mas o fluxo completo —
+diálogo → gravação → próxima abertura não pergunta de novo → menu "Alterar
+papel" reabre a pergunta — não foi exercitado ponta a ponta em Windows real.
 
 ## 7. Assinatura de código — pendência conhecida
 

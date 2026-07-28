@@ -1,118 +1,192 @@
-// Pure decision logic for the cluster protocol — no networking, no MongoDB
-// driver, no mDNS. Same "domain/" purity guarantee as domain/bracket and
-// domain/scoreboard/rules.ts: every branch here is unit-testable without a
-// real replica set.
+// Pure decision logic for the master/backup cluster protocol — no
+// networking, no MongoDB driver. Same "domain/" purity guarantee as
+// domain/bracket and domain/scoreboard/rules.ts: every branch here is
+// unit-testable without a real replica set.
+//
+// The core idea (see apps/arena/shared/src/cluster.ts's module doc comment
+// for the full picture): a MongoDB replica set member's ROLE in this app is
+// not "whoever won the last election" — it's DECLARED, and the declaration
+// lives entirely in the replica set config's `votes` field. `votes: 1` (the
+// master, always exactly one) can always elect itself since one vote is a
+// majority of one; `votes: 0` (the backup) can never win an election on its
+// own, no matter what happens to the master. Promoting the backup means
+// rewriting that config — a deliberate act, not something Mongo decides.
 
-import type { ClusterNodeDTO, ClusterNodeHealth, ClusterNodeRole, ClusterStatusDTO } from '@arena/shared'
+import type { ClusterNodeDTO, ClusterRole, MongoNodeState, StationStatusDTO, ClusterStatusDTO } from '@arena/shared'
 
-export interface DiscoveredPeer {
-  host: string // this peer's own mongod "ip:port"
-  serverPort: number // this peer's own server API port (for POST /api/cluster/join)
-  role: ClusterNodeRole
-  replicaSetName: string
+export function roleFromVotes(votes: number): ClusterRole {
+  return votes > 0 ? 'master' : 'backup'
 }
 
-// mDNS discovery deliberately only trusts peers announcing the SAME
-// replica set name — defends against two unrelated sensei-hub
-// installations (different academies/gyms) on the same LAN accidentally
-// merging into one cluster.
-export function filterPeersForReplicaSet(peers: DiscoveredPeer[], replicaSetName: string): DiscoveredPeer[] {
-  return peers.filter((p) => p.replicaSetName === replicaSetName)
-}
+const KNOWN_MONGO_STATES: readonly string[] = ['PRIMARY', 'SECONDARY', 'STARTUP', 'STARTUP2', 'RECOVERING', 'ROLLBACK']
 
-// Defense in depth against mDNS loopback (a node receiving its own
-// outgoing packets back — see mdns.ts's `loopback: false`, which is the
-// primary fix): even if loopback were ever re-enabled or the OS/network
-// stack echoes packets some other way, a node must never treat its own
-// announcement as a discovered peer.
-export function excludeSelf(peers: DiscoveredPeer[], selfHost: string): DiscoveredPeer[] {
-  return peers.filter((p) => p.host !== selfHost)
-}
-
-export type BootstrapDecision =
-  | { action: 'initiate' } // no peers found — become the founding primary
-  | { action: 'join'; primary: DiscoveredPeer } // an existing primary was found — ask it to rs.add() us
-  | { action: 'retry' } // peers exist but none announced as primary (mid-election) — wait and discover again
-
-// `peers` must already be filtered to the target replica set name.
-export function decideBootstrapAction(peers: DiscoveredPeer[]): BootstrapDecision {
-  if (peers.length === 0) return { action: 'initiate' }
-  const primary = peers.find((p) => p.role === 'primary')
-  if (primary) return { action: 'join', primary }
-  return { action: 'retry' }
-}
-
-// Raw shape of one entry in MongoDB's `replSetGetStatus` `members` array —
-// only the fields this module actually reads.
-export interface RawMemberStatus {
-  _id: number
-  name: string // "host:port"
-  stateStr: string // 'PRIMARY' | 'SECONDARY' | 'ARBITER' | 'STARTUP2' | 'RECOVERING' | 'DOWN' | ...
+export interface RawStatusMember {
+  name: string // "host:port", matches replSetGetStatus's `members[].name`
+  stateStr: string
   health: number // 1 = up, 0 = down, per the MongoDB wire protocol
-  optimeDate?: string // ISO date string; absent for arbiters
+  optimeDate?: string // ISO date string; absent when unreachable
 }
 
-function roleFromStateStr(stateStr: string): ClusterNodeRole {
-  if (stateStr === 'PRIMARY') return 'primary'
-  if (stateStr === 'SECONDARY') return 'secondary'
-  if (stateStr === 'ARBITER') return 'arbiter'
-  return 'unknown'
-}
-
-function healthOf(member: RawMemberStatus): ClusterNodeHealth {
+// `member.health === 0` (server unreachable) always wins over whatever
+// stale `stateStr` Mongo last recorded for it.
+export function mongoStateOf(member: RawStatusMember): MongoNodeState {
   if (member.health === 0) return 'unreachable'
-  return 'healthy' // lag-based downgrade to 'lagging' happens in toClusterStatusDTO, which knows the primary's optime
+  return KNOWN_MONGO_STATES.includes(member.stateStr) ? (member.stateStr as MongoNodeState) : 'unknown'
 }
 
-// `primaryOptimeMs` is the primary's own optime (ms since epoch) — needed to
-// compute each secondary's replication lag. `lagWarnSeconds` is the
-// threshold above which a healthy-but-behind secondary is reported as
-// 'lagging' instead of 'healthy' (default 10s: CBJ RNC rest-time-scale
-// tolerances aren't relevant here, this is just "noticeably behind").
-export function toClusterStatusDTO(
-  replicaSetName: string,
-  selfHost: string,
-  members: RawMemberStatus[],
-  primaryOptimeMs: number | null,
-  lagWarnSeconds = 10,
-): ClusterStatusDTO {
-  const nodes: ClusterNodeDTO[] = members.map((m) => {
-    const role = roleFromStateStr(m.stateStr)
-    let health = healthOf(m)
+export interface RawReplicaSetMember {
+  _id: number
+  host: string // "ip:port"
+  votes: number
+  priority: number
+}
+
+export interface RawReplicaSetConfig {
+  _id: string // replica set name
+  version: number
+  members: RawReplicaSetMember[]
+}
+
+export type DeclareBackupPlan =
+  | { action: 'noop'; reason: string } // already a member — declaring twice is a harmless no-op
+  | { action: 'reconfig'; config: RawReplicaSetConfig }
+
+// Adds `backupHost` as a non-voting, no-priority member. Never touches any
+// existing member — this is additive only. The caller (ClusterManager) is
+// responsible for actually reaching the backup's mongod before calling this;
+// this function only shapes the resulting config document.
+export function planDeclareBackup(config: RawReplicaSetConfig, backupHost: string): DeclareBackupPlan {
+  if (config.members.some((m) => m.host === backupHost)) {
+    return { action: 'noop', reason: 'This host is already a member of the replica set.' }
+  }
+  const nextId = Math.max(0, ...config.members.map((m) => m._id)) + 1
+  return {
+    action: 'reconfig',
+    config: {
+      ...config,
+      version: config.version + 1,
+      members: [...config.members, { _id: nextId, host: backupHost, votes: 0, priority: 0 }],
+    },
+  }
+}
+
+export type PromotionPlan =
+  | { action: 'error'; reason: string }
+  | { action: 'reconfig'; config: RawReplicaSetConfig }
+
+// Makes `selfHost` the sole voting member (votes:1, priority:1) and demotes
+// every other member to votes:0/priority:0 — it doesn't remove the former
+// master from the config. That's deliberate: if the old master comes back
+// later, it rejoins as an ordinary (now non-voting) secondary automatically,
+// with no operator action needed — it just becomes the new backup. Removing
+// members from the set on your own initiative is exactly the automatic
+// `rs.remove` behavior this redesign eliminates; only an explicit, separate
+// "remove from cluster" operator action should ever do that.
+export function planPromotion(config: RawReplicaSetConfig, selfHost: string): PromotionPlan {
+  const self = config.members.find((m) => m.host === selfHost)
+  if (!self) {
+    return { action: 'error', reason: `${selfHost} is not a member of this replica set.` }
+  }
+  if (self.votes > 0) {
+    return { action: 'error', reason: 'This node is already the voting master — nothing to promote.' }
+  }
+  return {
+    action: 'reconfig',
+    config: {
+      ...config,
+      version: config.version + 1,
+      members: config.members.map((m) => (m.host === selfHost ? { ...m, votes: 1, priority: 1 } : { ...m, votes: 0, priority: 0 })),
+    },
+  }
+}
+
+export interface PromotionSafetyCheck {
+  // Result of the caller actually trying to reach the currently-declared
+  // master and asking whether IT still thinks it's primary — see
+  // ClusterManager.promote()'s doc comment for how this is obtained.
+  oldMasterReachableAndPrimary: boolean
+  acknowledgeSplitBrainRisk: boolean
+}
+
+// Refuses promotion when the old master is still up and still thinks it's
+// primary — going ahead anyway would create two simultaneous masters
+// (split-brain), each accepting writes the other never sees. This is the
+// server-side guard behind the "confirmação clara do que acontece"
+// requirement: promoting is only safe once the old master is actually gone.
+// `acknowledgeSplitBrainRisk` is a deliberate, named escape hatch for the
+// rare legitimate case (e.g. a network partition where the backup can't
+// reach the master, but the master is otherwise fine and still serving
+// stations on its own side of the partition) — using it is a conscious
+// choice to accept the risk, not a default.
+export function decidePromotionSafety(check: PromotionSafetyCheck): { allowed: boolean; reason?: string } {
+  if (!check.oldMasterReachableAndPrimary) return { allowed: true }
+  if (check.acknowledgeSplitBrainRisk) return { allowed: true }
+  return {
+    allowed: false,
+    reason:
+      'O master declarado ainda está acessível e respondendo como primário. Promover o backup agora criaria dois masters ao mesmo tempo (split-brain), com risco real de perda de dados. Confirme que o master está de fato fora do ar antes de tentar novamente.',
+  }
+}
+
+const STATION_ONLINE_THRESHOLD_MS = 30_000
+
+export function isStationOnline(lastSeenAtIso: string, nowMs: number, thresholdMs = STATION_ONLINE_THRESHOLD_MS): boolean {
+  return nowMs - new Date(lastSeenAtIso).getTime() <= thresholdMs
+}
+
+export interface StationHeartbeatRow {
+  stationId: string
+  lastSeenAt: string // ISO
+}
+
+// Assembles the human-facing GET /cluster/status DTO from raw MongoDB
+// admin-command output plus the station heartbeat rows. Pure — all the
+// actual `replSetGetConfig`/`replSetGetStatus`/heartbeat-collection reads
+// happen in ClusterManager; this only shapes what they returned.
+export function buildClusterStatus(params: {
+  replicaSetName: string
+  selfHost: string
+  configMembers: RawReplicaSetMember[]
+  statusMembers: RawStatusMember[]
+  stations: StationHeartbeatRow[]
+  nowMs: number
+}): ClusterStatusDTO {
+  const { replicaSetName, selfHost, configMembers, statusMembers, stations, nowMs } = params
+  const statusByHost = new Map(statusMembers.map((m) => [m.name, m]))
+  const primary = statusMembers.find((m) => m.stateStr === 'PRIMARY')
+  const primaryOptimeMs = primary?.optimeDate ? new Date(primary.optimeDate).getTime() : null
+
+  const nodes: ClusterNodeDTO[] = configMembers.map((cm) => {
+    const status = statusByHost.get(cm.host)
+    const mongoState = status ? mongoStateOf(status) : 'unknown'
     let replicationLagSeconds: number | null = null
-
-    if (role === 'secondary' && health === 'healthy' && primaryOptimeMs !== null && m.optimeDate) {
-      const lagMs = primaryOptimeMs - new Date(m.optimeDate).getTime()
-      replicationLagSeconds = Math.max(0, Math.round(lagMs / 1000))
-      if (replicationLagSeconds > lagWarnSeconds) health = 'lagging'
+    if (mongoState === 'SECONDARY' && primaryOptimeMs !== null && status?.optimeDate) {
+      replicationLagSeconds = Math.max(0, Math.round((primaryOptimeMs - new Date(status.optimeDate).getTime()) / 1000))
     }
-
     return {
-      host: m.name,
-      role,
-      health,
-      isSelf: m.name === selfHost,
+      host: cm.host,
+      role: roleFromVotes(cm.votes),
+      mongoState,
+      isSelf: cm.host === selfHost,
       replicationLagSeconds,
     }
   })
+
+  const master = nodes.find((n) => n.role === 'master') ?? null
+  const backup = nodes.find((n) => n.role === 'backup') ?? null
+  const self = nodes.find((n) => n.isSelf) ?? null
+
+  const stationDTOs: StationStatusDTO[] = stations
+    .map((s) => ({ stationId: s.stationId, lastSeenAt: s.lastSeenAt, online: isStationOnline(s.lastSeenAt, nowMs) }))
+    .sort((a, b) => b.lastSeenAt.localeCompare(a.lastSeenAt))
 
   return {
     enabled: true,
     replicaSetName,
     selfHost,
-    nodes,
-    hasArbiter: nodes.some((n) => n.role === 'arbiter'),
-    needsArbiter: computeNeedsArbiter(members),
+    selfRole: self?.role ?? null,
+    master,
+    backup,
+    stations: stationDTOs,
   }
-}
-
-// "N=2 sem arbiter" — exactly two DATA-BEARING voting members (regardless
-// of current health; a temporarily unreachable member still counts, since
-// the risk computeNeedsArbiter guards against — both secondaries stuck
-// unable to elect a primary during a partition — is exactly when a member
-// might look unreachable from either side) and no arbiter yet.
-export function computeNeedsArbiter(members: RawMemberStatus[]): boolean {
-  const dataBearing = members.filter((m) => m.stateStr !== 'ARBITER')
-  const hasArbiter = members.some((m) => m.stateStr === 'ARBITER')
-  return dataBearing.length === 2 && !hasArbiter
 }

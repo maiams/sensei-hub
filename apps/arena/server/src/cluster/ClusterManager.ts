@@ -1,304 +1,347 @@
-import { MongoClient } from 'mongodb'
+import { MongoClient, type Db } from 'mongodb'
+import { createHash } from 'node:crypto'
 import { networkInterfaces } from 'node:os'
-import { MdnsCluster } from './mdns.js'
+import { Types } from 'mongoose'
+import { AuditLogModel, type AuthCtx } from '@sensei-hub/core-server'
+import { StationHeartbeatModel } from '../repositories/StationHeartbeatModel.js'
 import {
-  decideBootstrapAction,
-  filterPeersForReplicaSet,
-  excludeSelf,
-  toClusterStatusDTO,
-  type RawMemberStatus,
+  planDeclareBackup,
+  planPromotion,
+  decidePromotionSafety,
+  buildClusterStatus,
+  type RawReplicaSetConfig,
 } from './rules.js'
 import type { ClusterStatusDTO } from '@arena/shared'
 
 export interface ClusterManagerConfig {
+  // This node's DECLARED role — set once at machine setup time (see
+  // packages/desktop-runtime/src/machineRole.ts), never inferred or elected.
+  role: 'master' | 'backup'
   serverPort: number
   replicaSetName: string
   mongoPort: number
-  discoveryTimeoutMs: number
-  clusterSecret: string
   advertiseHost?: string | undefined
-  roleWatchIntervalMs?: number
+  // How long to wait for a direct connection when checking whether the
+  // currently-declared master is still alive and primary, before allowing a
+  // promotion. Short on purpose — this is a quick sanity check right before
+  // an operator-triggered action, not a health-monitoring subsystem.
+  masterReachabilityTimeoutMs?: number
 }
 
-const BOOTSTRAP_MAX_RETRIES = 3
-const DEFAULT_ROLE_WATCH_INTERVAL_MS = 5_000
-
-// Orchestrates Fase 7's dynamic cluster formation. Owns: mDNS announce +
-// discover (mdns.ts), the bootstrap decision (rules.ts, pure), and the
-// direct-connection MongoDB admin commands needed to act on that decision
-// (rs.initiate / rs.add / rs.remove / rs.stepDown — the same direct-
-// connection pattern packages/desktop-runtime/src/supervisor.ts already uses for its
-// own single-node rs.initiate()).
+// Owns the master/backup replica set protocol described in
+// apps/arena/shared/src/cluster.ts's module doc comment. Compared to the
+// Fase 7 design this replaces, the responsibilities shrink a lot:
 //
-// Division of responsibility with Supervisor (packages/desktop-runtime): Supervisor
-// spawns/supervises the mongod and server OS processes and, in cluster
-// mode, deliberately does NOT call rs.initiate() itself — it hands that
-// decision to ClusterManager (running inside the server process, which has
-// the mDNS discovery context Supervisor doesn't need to know about).
-// Supervisor keeps the one thing ClusterManager structurally can't do:
-// spawning a NEW mongod process for the N=2 arbiter (see needsArbiter()
-// exposed through GET /api/cluster/status, which Supervisor polls).
+//  - No mDNS peer discovery, no "found a set vs. join an existing one"
+//    bootstrap decision — the master always self-initiates (it's declared,
+//    there's nothing to discover), and the backup never initiates anything
+//    at all; it just waits to be added.
+//  - No node-to-node HTTP join handshake, no shared CLUSTER_SECRET — adding
+//    the backup is a direct `replSetReconfig` the MASTER runs against
+//    itself, needing only network reach to the backup's mongod PORT. MongoDB
+//    replication is pull-based from the secondary side: once the backup's
+//    (already-running) mongod is listed in the primary's config, it
+//    discovers that on its own via the ordinary internal replication
+//    heartbeat and starts syncing — no cooperation from the backup's own
+//    Fastify/application layer is needed for this part.
+//  - No arbiter, ever — a 2-member set where only the master votes never
+//    needs a tie-breaker, because there's only ever one voter.
+//  - No automatic `rs.remove` on shutdown — a stopped node just shows up as
+//    unreachable in status until it comes back (or an operator explicitly
+//    removes it some other way — not implemented by this class; see the
+//    class doc in the PR/report for what's intentionally left out).
+//
+// Station notebooks (see machineRole.ts) don't get a ClusterManager at all —
+// they run no local mongod and connect their own Fastify's mongoose straight
+// to a replicaSet-aware MONGODB_URI seeded with [master, backup]. The
+// MongoDB driver's own topology monitoring re-routes writes to whichever one
+// is currently the (sole) voting primary — including automatically, within
+// one heartbeat interval, right after an operator promotes the backup. That
+// is the entire answer to "stations need to reapontar rápido": it's the
+// driver's normal replica-set behavior, not custom code in this class.
 export class ClusterManager {
   #config: ClusterManagerConfig
-  #mdns = new MdnsCluster()
   #selfHost: string // "ip:mongoPort" — this node's own mongod address
-  #selfIp: string
-  #roleWatchTimer: NodeJS.Timeout | null = null
-  #currentRole: 'primary' | 'secondary' = 'secondary'
 
   constructor(config: ClusterManagerConfig) {
     this.#config = config
-    this.#selfIp = config.advertiseHost ?? findLanIPv4() ?? '127.0.0.1'
-    this.#selfHost = `${this.#selfIp}:${config.mongoPort}`
+    const ip = config.advertiseHost ?? findLanIPv4() ?? '127.0.0.1'
+    this.#selfHost = `${ip}:${config.mongoPort}`
   }
 
   get selfHost(): string {
     return this.#selfHost
   }
 
-  // Decides whether this node founds the replica set or joins an existing
-  // one, and makes it so. Must complete before the server connects via the
-  // replicaSet-aware mongoose URI (apps/arena/server/src/index.ts) — a mongod
-  // started with --replSet but never initiated/added to a config isn't a
-  // usable replica set member yet.
-  async bootstrap(): Promise<void> {
-    this.#mdns.setAnnouncement({
-      mongoHost: this.#selfHost,
-      serverPort: this.#config.serverPort,
-      role: 'secondary', // provisional — nobody should join against us until we actually have a role
-      replicaSetName: this.#config.replicaSetName,
-    })
-
-    for (let attempt = 0; attempt < BOOTSTRAP_MAX_RETRIES; attempt++) {
-      const peers = excludeSelf(
-        filterPeersForReplicaSet(await this.#mdns.discover(this.#config.discoveryTimeoutMs), this.#config.replicaSetName),
-        this.#selfHost,
-      )
-      const decision = decideBootstrapAction(peers)
-
-      if (decision.action === 'initiate') {
-        await this.#initiate()
-        this.#startRoleWatcher()
-        return
-      }
-
-      if (decision.action === 'join') {
-        await this.#requestJoin(decision.primary)
-        await this.#waitUntilSelfIsMember()
-        this.#startRoleWatcher()
-        return
-      }
-
-      // 'retry': peers exist but none announced as primary yet (mid-election
-      // on the existing cluster) — brief pause, try discovery again.
-      await sleep(1000)
-    }
-
-    throw new Error(
-      `Cluster bootstrap failed: found peers for replica set "${this.#config.replicaSetName}" but none announced as primary after ${BOOTSTRAP_MAX_RETRIES} attempts. Restart this node once the existing cluster has a stable primary.`,
-    )
+  get role(): 'master' | 'backup' {
+    return this.#config.role
   }
 
-  // Handler for POST /api/cluster/join — runs on whichever node receives
-  // the request (must be primary; the route layer authenticates via
-  // CLUSTER_SECRET and this method re-checks primary status defensively).
-  async handleJoinRequest(joiningMongoHost: string): Promise<void> {
-    const client = await this.#connectDirect()
+  // Master role only, called once at server startup. Idempotent — safe on
+  // every boot (a restarted master finds its set already initiated and does
+  // nothing). The backup role deliberately has no equivalent method here:
+  // its mongod just sits, started with --replSet but uninitiated, until the
+  // master's declareBackup() adds it.
+  async initializeIfNeeded(): Promise<void> {
+    if (this.#config.role !== 'master') return
+    const client = await this.#connectDirect(this.#selfHost)
     try {
       const admin = client.db('admin')
-      const hello = await admin.command({ hello: 1 })
-      if (!hello.isWritablePrimary) {
-        throw new ClusterManagerError('This node is not primary — cannot accept a join request', 409)
+      if (!(await this.#isInitiated(admin))) {
+        await admin.command({
+          replSetInitiate: {
+            _id: this.#config.replicaSetName,
+            members: [{ _id: 0, host: this.#selfHost, votes: 1, priority: 1 }],
+          },
+        })
+        await this.#waitForPrimary(this.#selfHost, 15_000)
+      }
+    } finally {
+      await client.close()
+    }
+  }
+
+  // Master-only, human-triggered from the cluster management screen (POST
+  // /api/cluster/backup, event_manager+ — see routes/cluster.ts).
+  async declareBackup(backupMongoHost: string, ctx: AuthCtx): Promise<ClusterStatusDTO> {
+    if (this.#config.role !== 'master') {
+      throw new ClusterManagerError('Only the master can declare a backup.', 409)
+    }
+    if (backupMongoHost === this.#selfHost) {
+      throw new ClusterManagerError('The backup cannot be the same machine as the master.', 400)
+    }
+
+    await this.#assertMongodReachable(
+      backupMongoHost,
+      'Não foi possível alcançar o mongod do backup nesse endereço — confirme que ele está rodando e que o endereço está correto.',
+    )
+
+    const client = await this.#connectDirect(this.#selfHost)
+    try {
+      const admin = client.db('admin')
+      const rawConfig = await this.#getRawConfig(admin)
+      const plan = planDeclareBackup(rawConfig, backupMongoHost)
+      if (plan.action === 'reconfig') {
+        await admin.command({ replSetReconfig: plan.config })
+        await AuditLogModel.create({
+          userId: ctx.userId,
+          entityType: 'Cluster',
+          entityId: clusterEntityId(this.#config.replicaSetName),
+          action: 'update',
+          fieldName: 'backup',
+          oldValue: null,
+          newValue: backupMongoHost,
+          sessionId: ctx.sessionId,
+          ip: ctx.ip,
+        })
+      }
+    } finally {
+      await client.close()
+    }
+
+    return this.getStatus()
+  }
+
+  // Disaster-recovery action, meant to be triggered FROM THE BACKUP NODE's
+  // own management screen — the master may well be the machine that just
+  // died, so nothing on this path ever depends on reaching it. Connects
+  // directly to SELF only, and, once the split-brain safety check clears,
+  // force-reconfigures the replica set to make self the sole voting member.
+  //
+  // `force: true` is the documented MongoDB escape hatch for this exact
+  // situation: a normal `replSetReconfig` must be run against the current
+  // primary, but by definition there is no reachable primary here (that's
+  // why the operator is promoting). `force` lets a secondary install a new
+  // config unilaterally when the primary is believed gone. Once installed,
+  // self is the only voter, so it can win an uncontested election
+  // immediately — a majority of one.
+  async promote(input: { acknowledgeSplitBrainRisk: boolean }, ctx: AuthCtx): Promise<ClusterStatusDTO> {
+    if (this.#config.role !== 'backup') {
+      throw new ClusterManagerError('Only a declared backup can be promoted.', 409)
+    }
+
+    const client = await this.#connectDirect(this.#selfHost)
+    try {
+      const admin = client.db('admin')
+      const rawConfig = await this.#getRawConfig(admin)
+      const formerMaster = rawConfig.members.find((m) => m.host !== this.#selfHost && m.votes > 0)
+
+      const oldMasterReachableAndPrimary = formerMaster ? await this.#isReachablePrimary(formerMaster.host) : false
+      const safety = decidePromotionSafety({
+        oldMasterReachableAndPrimary,
+        acknowledgeSplitBrainRisk: input.acknowledgeSplitBrainRisk,
+      })
+      if (!safety.allowed) {
+        throw new ClusterManagerError(safety.reason ?? 'Promoção recusada.', 409)
       }
 
-      const conf = await admin.command({ replSetGetConfig: 1 })
-      const members = conf.config.members as Array<{ _id: number; host: string }>
-      const alreadyMember = members.some((m) => m.host === joiningMongoHost)
-      if (alreadyMember) return // idempotent — matches Supervisor.initReplicaSetIfNeeded's precedent
+      const plan = planPromotion(rawConfig, this.#selfHost)
+      if (plan.action === 'error') {
+        throw new ClusterManagerError(plan.reason, 409)
+      }
 
-      const nextId = Math.max(0, ...members.map((m) => m._id)) + 1
-      const newMembers = [...members, { _id: nextId, host: joiningMongoHost, priority: 1, votes: 1 }]
-      await admin.command({
-        replSetReconfig: { ...conf.config, members: newMembers, version: conf.config.version + 1 },
+      await admin.command({ replSetReconfig: plan.config, force: true })
+      await this.#waitForPrimary(this.#selfHost, 30_000)
+
+      this.#config = { ...this.#config, role: 'master' }
+
+      await AuditLogModel.create({
+        userId: ctx.userId,
+        entityType: 'Cluster',
+        entityId: clusterEntityId(this.#config.replicaSetName),
+        action: 'update',
+        fieldName: 'master',
+        oldValue: formerMaster?.host ?? null,
+        newValue: this.#selfHost,
+        reason: input.acknowledgeSplitBrainRisk
+          ? 'Promoção manual do backup a master (risco de split-brain reconhecido pelo operador)'
+          : 'Promoção manual do backup a master',
+        sessionId: ctx.sessionId,
+        ip: ctx.ip,
+      })
+    } finally {
+      await client.close()
+    }
+
+    return this.getStatus()
+  }
+
+  async getStatus(): Promise<ClusterStatusDTO> {
+    const client = await this.#connectDirect(this.#selfHost)
+    try {
+      const admin = client.db('admin')
+
+      if (!(await this.#isInitiated(admin))) {
+        // Backup declared locally but not yet added by the master (or a
+        // master that hasn't run initializeIfNeeded() yet) — there's no
+        // replica set config to read yet. Still surface self so the
+        // management screen has something to show while waiting.
+        return {
+          enabled: true,
+          replicaSetName: this.#config.replicaSetName,
+          selfHost: this.#selfHost,
+          selfRole: this.#config.role,
+          master: this.#config.role === 'master' ? { host: this.#selfHost, role: 'master', mongoState: 'unknown', isSelf: true, replicationLagSeconds: null } : null,
+          backup: this.#config.role === 'backup' ? { host: this.#selfHost, role: 'backup', mongoState: 'unknown', isSelf: true, replicationLagSeconds: null } : null,
+          stations: [],
+        }
+      }
+
+      const rawConfig = await this.#getRawConfig(admin)
+      const rawStatus = (await admin.command({ replSetGetStatus: 1 })) as {
+        members: Array<{ name: string; stateStr: string; health: number; optimeDate?: Date }>
+      }
+      const statusMembers = rawStatus.members.map((m) => ({
+        name: m.name,
+        stateStr: m.stateStr,
+        health: m.health,
+        ...(m.optimeDate ? { optimeDate: new Date(m.optimeDate).toISOString() } : {}),
+      }))
+      // .read('nearest') matters specifically when THIS node is the backup:
+      // its own mongoose connection would otherwise use the default
+      // primary-only read preference and fail outright whenever this node
+      // is (as expected, most of the time) a secondary — status must stay
+      // readable from a backup that was never promoted, not just the master.
+      // Still wrapped in try/catch: right after being declared, a backup is
+      // briefly in an intermediate replication state (initial sync, before
+      // it settles into SECONDARY) where even a 'nearest' read is refused —
+      // that shouldn't take down the whole status response, just omit the
+      // stations list for that one narrow window.
+      const stations = await StationHeartbeatModel.find()
+        .read('nearest')
+        .sort({ lastSeenAt: -1 })
+        .limit(200)
+        .catch(() => [])
+
+      return buildClusterStatus({
+        replicaSetName: this.#config.replicaSetName,
+        selfHost: this.#selfHost,
+        configMembers: rawConfig.members,
+        statusMembers,
+        stations: stations.map((s) => ({ stationId: s.stationId, lastSeenAt: s.lastSeenAt.toISOString() })),
+        nowMs: Date.now(),
       })
     } finally {
       await client.close()
     }
   }
 
-  async getStatus(): Promise<ClusterStatusDTO> {
-    const client = await this.#connectDirect()
+  async #getRawConfig(admin: Db): Promise<RawReplicaSetConfig> {
+    const conf = await admin.command({ replSetGetConfig: 1 })
+    const raw = conf.config as {
+      _id: string
+      version: number
+      members: Array<{ _id: number; host: string; votes?: number; priority?: number }>
+    }
+    return {
+      _id: raw._id,
+      version: raw.version,
+      members: raw.members.map((m) => ({ _id: m._id, host: m.host, votes: m.votes ?? 1, priority: m.priority ?? 1 })),
+    }
+  }
+
+  async #isInitiated(admin: Db): Promise<boolean> {
     try {
-      const admin = client.db('admin')
-      const status = await admin.command({ replSetGetStatus: 1 })
-      const members = status.members as RawMemberStatus[]
-      const primary = members.find((m) => m.stateStr === 'PRIMARY')
-      const primaryOptimeMs = primary?.optimeDate ? new Date(primary.optimeDate).getTime() : null
-      return toClusterStatusDTO(this.#config.replicaSetName, this.#selfHost, members, primaryOptimeMs)
-    } finally {
-      await client.close()
+      await admin.command({ replSetGetStatus: 1 })
+      return true
+    } catch (err: unknown) {
+      if ((err as { codeName?: string }).codeName === 'NotYetInitialized') return false
+      throw err
     }
   }
 
-  // `rs.stepDown()` if primary (gives the remaining nodes a chance to elect
-  // a new primary before this process exits), then removes self from the
-  // voting config via whichever node is primary afterwards. Best-effort by
-  // design: a node that crashes ungracefully (power loss, kill -9) skips
-  // this — the remaining nodes just see it as 'unreachable' in
-  // replSetGetStatus until an operator removes it manually, which is the
-  // correct and expected MongoDB replica set behavior, not a bug here.
-  async gracefulLeave(): Promise<void> {
-    this.#stopRoleWatcher()
-    this.#mdns.setAnnouncement(null)
-    this.#mdns.setPrimaryAlias(null)
-
-    try {
-      const self = await this.#connectDirect()
-      try {
-        const admin = self.db('admin')
-        const hello = await admin.command({ hello: 1 })
-        if (hello.isWritablePrimary) {
-          await admin.command({ replSetStepDown: 30, secondaryCatchUpPeriodSecs: 10 }).catch(() => null)
-          await sleep(2000) // give the remaining members a moment to elect a new primary
-        }
-      } finally {
-        await self.close()
-      }
-
-      // Whoever is primary now (possibly unchanged, if self was never
-      // primary) removes self from the voting config.
-      const client = await this.#connectDirect()
-      try {
-        const admin = client.db('admin')
-        const hello = await admin.command({ hello: 1 })
-        const primaryHost = hello.primary as string | undefined
-        if (!primaryHost) return // no reachable primary — nothing more this node can safely do
-
-        const usingSelf = primaryHost === this.#selfHost
-        const targetClient = usingSelf ? client : new MongoClient(`mongodb://${primaryHost}`, { directConnection: true })
-        if (!usingSelf) await targetClient.connect()
-        try {
-          const targetAdmin = targetClient.db('admin')
-          const conf = await targetAdmin.command({ replSetGetConfig: 1 })
-          const members = conf.config.members as Array<{ host: string }>
-          const remaining = members.filter((m) => m.host !== this.#selfHost)
-          if (remaining.length === members.length) return // already not a member
-          await targetAdmin.command({
-            replSetReconfig: { ...conf.config, members: remaining, version: conf.config.version + 1 },
-          })
-        } finally {
-          if (!usingSelf) await targetClient.close()
-        }
-      } finally {
-        await client.close()
-      }
-    } catch (err) {
-      // Best-effort — a failed graceful leave just means the remaining
-      // members will see this node as unreachable, same as an ungraceful
-      // crash. Never throw out of shutdown.
-      console.warn('[cluster] graceful leave did not complete cleanly', err)
-    }
-
-    this.#mdns.destroy()
-  }
-
-  async #initiate(): Promise<void> {
-    const client = await this.#connectDirect()
-    try {
-      const admin = client.db('admin')
-      let alreadyInitiated = false
-      try {
-        await admin.command({ replSetGetStatus: 1 })
-        alreadyInitiated = true
-      } catch (err: unknown) {
-        if ((err as { codeName?: string }).codeName !== 'NotYetInitialized') throw err
-      }
-      if (!alreadyInitiated) {
-        await admin.command({
-          replSetInitiate: {
-            _id: this.#config.replicaSetName,
-            members: [{ _id: 0, host: this.#selfHost, priority: 1 }],
-          },
-        })
-      }
-    } finally {
-      await client.close()
-    }
-  }
-
-  async #requestJoin(primary: { host: string; serverPort: number }): Promise<void> {
-    const peerIp = primary.host.split(':')[0]
-    const joinUrl = `http://${peerIp}:${primary.serverPort}/api/cluster/join`
-
-    const res = await fetch(joinUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Cluster-Secret': this.#config.clusterSecret },
-      body: JSON.stringify({ mongoHost: this.#selfHost }),
-    })
-    if (!res.ok) {
-      const body = await res.text().catch(() => '')
-      throw new Error(`Join request to ${joinUrl} failed: ${res.status} ${body}`)
-    }
-  }
-
-  async #waitUntilSelfIsMember(timeoutMs = 30_000): Promise<void> {
+  async #waitForPrimary(host: string, timeoutMs: number): Promise<void> {
     const deadline = Date.now() + timeoutMs
     while (Date.now() < deadline) {
       try {
-        const client = await this.#connectDirect()
+        const client = await this.#connectDirect(host)
         try {
           const hello = await client.db('admin').command({ hello: 1 })
-          if (hello.setName === this.#config.replicaSetName) return
+          if (hello.isWritablePrimary) return
         } finally {
           await client.close()
         }
       } catch {
         // not ready yet
       }
-      await sleep(500)
+      await sleep(300)
     }
-    throw new Error(`Did not become a member of replica set "${this.#config.replicaSetName}" within ${timeoutMs}ms`)
+    throw new Error(`Timed out waiting for ${host} to become primary`)
   }
 
-  #startRoleWatcher(): void {
-    const interval = this.#config.roleWatchIntervalMs ?? DEFAULT_ROLE_WATCH_INTERVAL_MS
-    this.#roleWatchTimer = setInterval(() => void this.#refreshRole(), interval)
-    void this.#refreshRole()
-  }
-
-  #stopRoleWatcher(): void {
-    if (this.#roleWatchTimer) clearInterval(this.#roleWatchTimer)
-    this.#roleWatchTimer = null
-  }
-
-  async #refreshRole(): Promise<void> {
+  async #isReachablePrimary(host: string): Promise<boolean> {
     try {
-      const client = await this.#connectDirect()
-      let hello: { isWritablePrimary?: boolean }
+      const client = new MongoClient(`mongodb://${host}`, {
+        directConnection: true,
+        serverSelectionTimeoutMS: this.#config.masterReachabilityTimeoutMs ?? 2000,
+      })
+      await client.connect()
       try {
-        hello = await client.db('admin').command({ hello: 1 })
+        const hello = await client.db('admin').command({ hello: 1 })
+        return hello.isWritablePrimary === true
       } finally {
         await client.close()
       }
-      const role: 'primary' | 'secondary' = hello.isWritablePrimary ? 'primary' : 'secondary'
-      if (role !== this.#currentRole) {
-        console.log(`[cluster] role changed: ${this.#currentRole} -> ${role}`)
-      }
-      this.#currentRole = role
-      this.#mdns.setAnnouncement({
-        mongoHost: this.#selfHost,
-        serverPort: this.#config.serverPort,
-        role,
-        replicaSetName: this.#config.replicaSetName,
-      })
-      this.#mdns.setPrimaryAlias(role === 'primary' ? this.#selfIp : null)
-    } catch (err) {
-      console.warn('[cluster] role refresh failed', err)
+    } catch {
+      return false
     }
   }
 
-  async #connectDirect(): Promise<MongoClient> {
-    const client = new MongoClient(`mongodb://${this.#selfHost}`, {
+  async #assertMongodReachable(host: string, message: string): Promise<void> {
+    try {
+      const client = new MongoClient(`mongodb://${host}`, {
+        directConnection: true,
+        serverSelectionTimeoutMS: this.#config.masterReachabilityTimeoutMs ?? 3000,
+      })
+      await client.connect()
+      await client.close()
+    } catch {
+      throw new ClusterManagerError(message, 422)
+    }
+  }
+
+  async #connectDirect(host: string): Promise<MongoClient> {
+    const client = new MongoClient(`mongodb://${host}`, {
       directConnection: true,
       serverSelectionTimeoutMS: 5000,
     })
@@ -310,11 +353,21 @@ export class ClusterManager {
 export class ClusterManagerError extends Error {
   constructor(
     message: string,
-    public readonly statusCode: 403 | 409,
+    public readonly statusCode: 400 | 404 | 409 | 422,
   ) {
     super(message)
     this.name = 'ClusterManagerError'
   }
+}
+
+// Cluster-level audit entries (declare backup / promote) aren't tied to any
+// single Mongoose document, but AuditLogModel requires an ObjectId
+// `entityId` — deriving a stable one from the replica set name (rather than
+// a fresh random id per entry) means every audit entry for the same cluster
+// groups under one entity for history lookups.
+function clusterEntityId(replicaSetName: string): Types.ObjectId {
+  const hash = createHash('md5').update(replicaSetName).digest()
+  return new Types.ObjectId(hash.subarray(0, 12))
 }
 
 function findLanIPv4(): string | null {

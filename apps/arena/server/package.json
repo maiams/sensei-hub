@@ -27,12 +27,10 @@
     "fastify": "^5.4.0",
     "mongodb": "^6.20.0",
     "mongoose": "^8.16.1",
-    "multicast-dns": "^7.2.5",
     "xlsx": "^0.18.5",
     "zod": "^3.25.67"
   },
   "devDependencies": {
-    "@types/multicast-dns": "^7.2.4",
     "@types/node": "^24.0.10",
     "mongodb-memory-server": "^11.2.0",
     "tsx": "^4.20.3",

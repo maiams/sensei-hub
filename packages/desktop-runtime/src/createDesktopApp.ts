@@ -11,7 +11,7 @@ import {
   showLoadingOverlay,
   hideLoadingOverlay,
 } from './kiosk.js'
-import { resolveNetworkMode, resetNetworkMode } from './networkMode.js'
+import { resolveMachineRole, resetMachineRole, type MachineRole } from './machineRole.js'
 
 export interface DesktopAppConfig {
   /** "Sensei Dojô" / "Sensei Arena" — shown in dialogs and the loading overlay. */
@@ -29,7 +29,7 @@ export interface DesktopAppConfig {
   features: {
     /** Arena only: fullscreen scoreboard windows + a launcher that lists them. */
     kiosk: boolean
-    /** Arena only: Fase 7 mDNS cluster + automatic arbiter for N=2. */
+    /** Arena only: master/backup declarado — see machineRole.ts. */
     cluster: boolean
   }
 }
@@ -79,21 +79,13 @@ export function createDesktopApp(config: DesktopAppConfig): void {
     return dataDir
   }
 
-  function resolveArbiterDataDir(): string {
-    const dataDir = path.join(app.getPath('userData'), 'mongodb-arbiter-data')
-    fs.mkdirSync(dataDir, { recursive: true })
-    return dataDir
-  }
-
   let supervisor: Supervisor | null = null
 
   configureKiosk({ appOrigin: config.appOrigin, webPort: config.webPort, productName: config.productName })
 
-  // Only products that ship the Fase 7 cluster engine ask this (today:
-  // Arena — Dojô's features.cluster is false, so it's always standalone,
-  // no dialog, no menu item). CLUSTER_ENABLED=true stays as a dev/CI
-  // override so scripts/dev-run.mjs and automated packaging smoke tests
-  // don't have to click through a native dialog.
+  // Only products that ship the cluster feature ask this (today: Arena —
+  // Dojô's features.cluster is false, so it's always standalone, no dialog,
+  // no menu item).
   if (config.features.cluster) {
     const template: Electron.MenuItemConstructorOptions[] = [
       ...(process.platform === 'darwin' ? [{ role: 'appMenu' as const }] : []),
@@ -104,9 +96,9 @@ export function createDesktopApp(config: DesktopAppConfig): void {
         label: 'Rede',
         submenu: [
           {
-            label: 'Alterar modo de rede…',
+            label: 'Alterar papel deste computador…',
             click: () => {
-              resetNetworkMode()
+              resetMachineRole()
               app.relaunch()
               app.exit()
             },
@@ -138,12 +130,18 @@ export function createDesktopApp(config: DesktopAppConfig): void {
       : createLauncherWindow(launcherUrl, { width: 1200, height: 800 })
     showLoadingOverlay()
 
-    // CLUSTER_ENABLED=true is a dev/CI bypass (scripts/dev-run.mjs, packaging
-    // smoke tests) — anything else goes through the persisted, ask-once
-    // dialog. Dojô (features.cluster: false) never reaches either branch.
-    const clusterEnabled = config.features.cluster
-      ? process.env.CLUSTER_ENABLED === 'true' || resolveNetworkMode(config.productName) === 'cluster'
-      : false
+    // CLUSTER_ROLE=<role> is a dev/CI bypass (scripts/dev-run.mjs, packaging
+    // smoke tests) that skips the native dialog entirely — anything else
+    // goes through the persisted, ask-once dialog. Dojô (features.cluster:
+    // false) never reaches either branch, always 'standalone'.
+    const envRole = process.env.CLUSTER_ROLE as MachineRole | undefined
+    const machineRole = config.features.cluster
+      ? envRole && ['standalone', 'master', 'backup', 'station'].includes(envRole)
+        ? { role: envRole, ...(process.env.CLUSTER_STATION_SEEDS ? { stationSeeds: process.env.CLUSTER_STATION_SEEDS.split(',') } : {}) }
+        : await resolveMachineRole(config.productName)
+      : { role: 'standalone' as const }
+
+    const isCluster = machineRole.role !== 'standalone'
 
     supervisor = new Supervisor(
       resolveMongoPath(),
@@ -164,19 +162,28 @@ export function createDesktopApp(config: DesktopAppConfig): void {
         },
       },
       {
+        role: machineRole.role,
         serverPort: config.serverPort,
         webPort: config.webPort,
         mongoPort: config.mongoPort,
         replicaSetName: config.replicaSetName,
-        mongodbUri: `mongodb://127.0.0.1:${config.mongoPort}/${config.dbName}?replicaSet=${config.replicaSetName}`,
         webScript: resolveWebScript(),
-        ...(clusterEnabled
+        ...(machineRole.role === 'station'
           ? {
-              bindIp: '0.0.0.0',
-              clusterEnabled: true,
-              arbiterDataDir: resolveArbiterDataDir(),
+              // No local mongod at all — seeded straight from the
+              // master/backup addresses entered once at setup (see
+              // machineRole.ts's doc comment for why nothing more is ever
+              // needed here again, including right after a promotion).
+              mongodbUri: `mongodb://${(machineRole.stationSeeds ?? []).join(',')}/${config.dbName}?replicaSet=${config.replicaSetName}&heartbeatFrequencyMS=2000`,
+            }
+          : {
+              mongodbUri: `mongodb://127.0.0.1:${config.mongoPort}/${config.dbName}?replicaSet=${config.replicaSetName}`,
+            }),
+        ...(isCluster
+          ? {
+              bindIp: machineRole.role === 'master' || machineRole.role === 'backup' ? '0.0.0.0' : '127.0.0.1',
               clusterEnv: {
-                CLUSTER_SECRET: process.env.CLUSTER_SECRET ?? 'dev-cluster-secret-change-me',
+                CLUSTER_ROLE: machineRole.role,
                 CLUSTER_REPLICA_SET_NAME: config.replicaSetName,
                 CLUSTER_MONGO_PORT: String(config.mongoPort),
                 ...(process.env.CLUSTER_ADVERTISE_HOST

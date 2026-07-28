@@ -3,6 +3,7 @@ import './globals.css'
 import { ServiceWorkerRegister } from '../components/ServiceWorkerRegister'
 import { SyncStatusBadge } from '../components/SyncStatusBadge'
 import { AppHeader } from '../components/AppHeader'
+import { StationHeartbeat } from '../components/StationHeartbeat'
 
 export const metadata: Metadata = {
   title: 'Sensei Arena',
@@ -21,6 +22,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <ServiceWorkerRegister />
         <AppHeader />
+        <StationHeartbeat />
         {children}
         <SyncStatusBadge />
       </body>
