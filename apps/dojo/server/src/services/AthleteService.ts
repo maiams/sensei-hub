@@ -172,6 +172,18 @@ export class AthleteService {
   }
 
   async updateAthlete(id: string, data: UpdateAthleteParams, ctx: AuthCtx) {
+    // The route only requires 'staff' (front desk needs to fix a phone
+    // number or belt typo), but medicalNotes/allergies are readable by
+    // coach+ only (see #toDTO's includeMedical) — without this check a
+    // staff-level PATCH could still *write* them, which would make the
+    // read-side restriction pointless.
+    if (
+      (data.medicalNotes !== undefined || data.allergies !== undefined) &&
+      !hasMinRole(ctx.role, 'coach')
+    ) {
+      throw new AthleteServiceError('Only coach and above can update medical notes/allergies', 403)
+    }
+
     const athlete = await AthleteModel.findOne({ _id: id, academyId: ctx.academyId }).select('+medical')
     if (!athlete) {
       throw new AthleteServiceError('Athlete not found', 404)

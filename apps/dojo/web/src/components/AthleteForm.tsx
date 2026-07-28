@@ -26,7 +26,13 @@ export interface AthleteFormValues {
 const EMPTY_VALUES: AthleteFormValues = {
   fullName: '',
   preferredName: '',
-  gender: 'male',
+  // Não assumir "Masculino": um operador apressado no cadastro rápido pode
+  // não notar o combobox e deixar o padrão errado — isso alimenta a
+  // categoria/divisão do atleta na exportação para o campeonato. Com
+  // 'not_informed', a exportação exporta a célula de gênero vazia e a Arena
+  // sinaliza a linha para o operador completar, em vez de silenciosamente
+  // registrar o gênero errado (ver ExportService).
+  gender: 'not_informed',
   birthDate: '',
   nationality: 'Brazilian',
   email: '',
@@ -129,6 +135,13 @@ export function AthleteForm({ mode, athleteId, initialValues, onSuccess }: Athle
         termsAccepted: guardian.termsAccepted,
         imageAuthorizationAccepted: guardian.imageAuthorizationAccepted,
       }
+      // For a minor, the athlete's own terms/image-authorization flags mean
+      // "the guardian consented on the athlete's behalf" — there is no
+      // separate checkbox for this below (it would just be a second,
+      // easy-to-forget control tracking the same real-world consent). Mirror
+      // the guardian's answers instead of trusting an unlinked checkbox.
+      payload['termsAccepted'] = guardian.termsAccepted
+      payload['imageAuthorizationAccepted'] = guardian.imageAuthorizationAccepted
     }
 
     try {
@@ -433,27 +446,29 @@ export function AthleteForm({ mode, athleteId, initialValues, onSuccess }: Athle
         </section>
       )}
 
-      <section className="space-y-4">
-        <label className="flex items-center gap-3 text-slate-200">
-          <input
-            type="checkbox"
-            required={!minor}
-            className="h-5 w-5 rounded border-slate-600 bg-slate-800"
-            checked={values.termsAccepted}
-            onChange={(e) => set('termsAccepted', e.target.checked)}
-          />
-          {minor ? 'Termo de responsabilidade aceito (pelo responsável acima)' : 'Aceito o termo de responsabilidade'}
-        </label>
-        <label className="flex items-center gap-3 text-slate-200">
-          <input
-            type="checkbox"
-            className="h-5 w-5 rounded border-slate-600 bg-slate-800"
-            checked={values.imageAuthorizationAccepted}
-            onChange={(e) => set('imageAuthorizationAccepted', e.target.checked)}
-          />
-          Autorizo uso de imagem
-        </label>
-      </section>
+      {!minor && (
+        <section className="space-y-4">
+          <label className="flex items-center gap-3 text-slate-200">
+            <input
+              type="checkbox"
+              required={!minor}
+              className="h-5 w-5 rounded border-slate-600 bg-slate-800"
+              checked={values.termsAccepted}
+              onChange={(e) => set('termsAccepted', e.target.checked)}
+            />
+            Aceito o termo de responsabilidade
+          </label>
+          <label className="flex items-center gap-3 text-slate-200">
+            <input
+              type="checkbox"
+              className="h-5 w-5 rounded border-slate-600 bg-slate-800"
+              checked={values.imageAuthorizationAccepted}
+              onChange={(e) => set('imageAuthorizationAccepted', e.target.checked)}
+            />
+            Autorizo uso de imagem
+          </label>
+        </section>
+      )}
 
       {error && (
         <div className="rounded-lg border border-red-800 bg-red-950 px-4 py-3 text-sm text-red-300">{error}</div>

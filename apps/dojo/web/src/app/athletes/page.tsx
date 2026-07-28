@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { apiFetch, isLoggedIn, getAccessToken } from '../../lib/api'
+import { hasMinRole, type UserRole } from '@sensei-hub/shared'
+import { apiFetch, ApiError, isLoggedIn, getAccessToken, getCurrentRole } from '../../lib/api'
 import { BELT_LABELS, formatDate } from '../../lib/labels'
 
 interface AthleteListItem {
@@ -29,6 +30,11 @@ export default function AthletesPage() {
   const [result, setResult] = useState<AthleteListResult | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  // Read only inside an effect (see AppHeader) — getCurrentRole() touches
+  // localStorage, which doesn't exist during SSR; reading it straight in the
+  // render body would make the server and the first client render disagree.
+  const [role, setRole] = useState<UserRole | null>(null)
+  const canManageAthletes = role !== null && hasMinRole(role, 'staff')
 
   const load = useCallback(async (q: string) => {
     setLoading(true)
@@ -37,8 +43,17 @@ export default function AthletesPage() {
       const search = q ? `?q=${encodeURIComponent(q)}` : ''
       const data = await apiFetch<AthleteListResult>(`/athletes${search}`)
       setResult(data)
-    } catch {
-      setError('Não foi possível carregar os atletas.')
+    } catch (err) {
+      // A 403 here means the logged-in role isn't allowed to see the athlete
+      // list at all (e.g. weigh_in_operator, scoreboard_operator, athlete,
+      // guardian) — say so plainly instead of a generic "couldn't load",
+      // which reads as a connectivity problem and leaves the operator
+      // guessing why every retry fails the same way.
+      if (err instanceof ApiError && err.status === 403) {
+        setError('Seu usuário não tem permissão para ver a lista de atletas.')
+      } else {
+        setError('Não foi possível carregar os atletas.')
+      }
     } finally {
       setLoading(false)
     }
@@ -49,6 +64,7 @@ export default function AthletesPage() {
       router.replace('/login')
       return
     }
+    setRole(getCurrentRole() as UserRole | null)
     void load('')
   }, [router, load])
 
@@ -85,20 +101,22 @@ export default function AthletesPage() {
       <div className="mx-auto max-w-3xl">
         <div className="mb-6 flex items-center justify-between gap-4">
           <h1 className="text-2xl font-bold tracking-tight">Atletas</h1>
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => void handleExport()}
-              className="rounded-lg border border-slate-700 px-4 py-2.5 text-sm font-medium text-slate-200 transition hover:border-slate-500"
-            >
-              Exportar p/ campeonato (.xlsx)
-            </button>
-            <Link
-              href="/athletes/new"
-              className="rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-500"
-            >
-              + Cadastrar atleta
-            </Link>
-          </div>
+          {canManageAthletes && (
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => void handleExport()}
+                className="rounded-lg border border-slate-700 px-4 py-2.5 text-sm font-medium text-slate-200 transition hover:border-slate-500"
+              >
+                Exportar p/ campeonato (.xlsx)
+              </button>
+              <Link
+                href="/athletes/new"
+                className="rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-500"
+              >
+                + Cadastrar atleta
+              </Link>
+            </div>
+          )}
         </div>
 
         <form onSubmit={handleSearchSubmit} className="mb-6 flex gap-2">

@@ -323,6 +323,57 @@ describe('PATCH /api/athletes/:id', () => {
     expect(res.statusCode).toBe(200)
     expect(res.json().phone).toBe('11988887777')
   })
+
+  it('returns 403 when a staff role (below coach) tries to write medicalNotes or allergies', async () => {
+    const adminToken = await setupAdmin()
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/athletes',
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: adultAthletePayload(),
+    })
+    const athleteId = createRes.json().id
+
+    const staffToken = await createUserAndLogin(adminToken, 'staff', 'staff-med@test.com')
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/api/athletes/${athleteId}`,
+      headers: { authorization: `Bearer ${staffToken}` },
+      payload: { medicalNotes: 'não deveria conseguir gravar isso' },
+    })
+    expect(res.statusCode).toBe(403)
+
+    // Confirms nothing was written — a coach still sees no medical notes.
+    const coachToken = await createUserAndLogin(adminToken, 'coach', 'coach-med@test.com')
+    const readRes = await app.inject({
+      method: 'GET',
+      url: `/api/athletes/${athleteId}`,
+      headers: { authorization: `Bearer ${coachToken}` },
+    })
+    expect(readRes.json().medicalNotes).toBeUndefined()
+  })
+
+  it('allows a coach to update medicalNotes and allergies', async () => {
+    const adminToken = await setupAdmin()
+    const createRes = await app.inject({
+      method: 'POST',
+      url: '/api/athletes',
+      headers: { authorization: `Bearer ${adminToken}` },
+      payload: adultAthletePayload(),
+    })
+    const athleteId = createRes.json().id
+
+    const coachToken = await createUserAndLogin(adminToken, 'coach', 'coach-med2@test.com')
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/api/athletes/${athleteId}`,
+      headers: { authorization: `Bearer ${coachToken}` },
+      payload: { medicalNotes: 'Asma leve', allergies: 'Ibuprofeno' },
+    })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().medicalNotes).toBe('Asma leve')
+    expect(res.json().allergies).toBe('Ibuprofeno')
+  })
 })
 
 describe('DELETE /api/athletes/:id', () => {

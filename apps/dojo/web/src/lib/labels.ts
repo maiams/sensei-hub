@@ -28,6 +28,18 @@ export const ATHLETE_STATUS_LABELS: Record<string, string> = {
   pending: 'Pendente',
 }
 
+export const USER_ROLE_LABELS: Record<string, string> = {
+  super_admin: 'Super admin',
+  academy_admin: 'Admin da academia',
+  event_manager: 'Gestor de evento',
+  coach: 'Treinador',
+  staff: 'Equipe/recepção',
+  weigh_in_operator: 'Operador de pesagem',
+  scoreboard_operator: 'Mesário/placar',
+  athlete: 'Atleta',
+  guardian: 'Responsável',
+}
+
 const DOJO_API_ERROR_TRANSLATIONS: Record<string, string> = {
   'Invalid CPF': 'CPF inválido',
   'CPF already registered in this academy': 'Este CPF já está cadastrado nesta academia',
