@@ -8,6 +8,8 @@
     "start": "next start --port 3000",
     "typecheck": "tsc --noEmit",
     "lint": "next lint",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "clean": "rm -rf .next out"
   },
   "dependencies": {
@@ -27,7 +29,10 @@
     "@types/node": "^24.0.10",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.5",
+    "fake-indexeddb": "^6.2.5",
+    "jsdom": "^26.1.0",
     "tailwindcss": "^4.1.11",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.6"
   }
 }
