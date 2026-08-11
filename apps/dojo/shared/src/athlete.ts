@@ -6,6 +6,7 @@ export type AthleteStatus = z.infer<typeof AthleteStatus>
 
 // Mutable fields an operator can provide when creating an athlete
 const AthleteWritableFields = {
+  userId: z.string().optional(),
   fullName: z.string().min(2).max(120),
   preferredName: z.string().max(60).optional(),
   gender: Gender,
@@ -74,6 +75,7 @@ export type UpdateAthleteInput = z.infer<typeof UpdateAthleteInput>
 export const AthleteDTO = z.object({
   _id: z.string(),
   academyId: z.string(),
+  userId: z.string().optional(),
   status: AthleteStatus,
   enrollmentNumber: z.string(),
   fullName: z.string(),

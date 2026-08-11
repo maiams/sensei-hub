@@ -5,6 +5,7 @@ import { type AthleteStatus } from '@dojo/shared'
 export interface AthleteDocument {
   _id: Types.ObjectId
   academyId: Types.ObjectId
+  userId?: Types.ObjectId
   status: AthleteStatus
   enrollmentNumber: string
   fullName: string
@@ -35,6 +36,7 @@ export interface AthleteDocument {
 const athleteSchema = new Schema<AthleteDocument>(
   {
     academyId: { type: Schema.Types.ObjectId, ref: 'Academy', required: true, index: true },
+    userId: { type: Schema.Types.ObjectId, ref: 'User' },
     status: { type: String, required: true, enum: ['active', 'inactive', 'suspended', 'pending'], default: 'active' },
     enrollmentNumber: { type: String, required: true },
     fullName: { type: String, required: true, trim: true, maxlength: 120 },
@@ -73,6 +75,10 @@ const athleteSchema = new Schema<AthleteDocument>(
 )
 
 athleteSchema.index({ academyId: 1, status: 1 })
+athleteSchema.index(
+  { academyId: 1, userId: 1 },
+  { unique: true, partialFilterExpression: { userId: { $type: 'objectId' } } },
+)
 athleteSchema.index({ academyId: 1, enrollmentNumber: 1 }, { unique: true })
 // CPF unique per academy, only when present.
 athleteSchema.index(

@@ -1,2 +1,48 @@
 @import "tailwindcss";
 @source "../**/*.{ts,tsx}";
+
+:root {
+  color-scheme: dark;
+  --dojo-bottom-nav-height: 4.75rem;
+}
+
+html {
+  background: #020617;
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  background: #020617;
+  color: #f8fafc;
+  font-family: Arial, Helvetica, sans-serif;
+  text-rendering: optimizeLegibility;
+}
+
+button,
+a,
+input,
+select,
+textarea {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid #38bdf8;
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

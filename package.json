@@ -19,6 +19,7 @@
     "dev:dojo": "node scripts/dev-run.mjs dojo",
     "dev:arena": "node scripts/dev-run.mjs arena",
     "dev:seed": "node scripts/dev-seed.mjs",
+    "seed:dojo": "node scripts/dev-seed-dojo.mjs",
     "package:dojo": "node scripts/package-app.mjs dojo",
     "package:arena": "node scripts/package-app.mjs arena",
     "package:installer:win": "node scripts/package-installer.mjs -- --x64"

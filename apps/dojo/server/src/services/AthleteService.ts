@@ -2,7 +2,7 @@ import mongoose, { type Types } from 'mongoose'
 import { AthleteModel, type AthleteDocument } from '../repositories/AthleteModel.js'
 import { GuardianModel, type GuardianDocument } from '../repositories/GuardianModel.js'
 import { BeltRecordModel, type BeltRecordDocument } from '../repositories/BeltRecordModel.js'
-import { AcademyModel, AuditLogModel, type AuthCtx } from '@sensei-hub/core-server'
+import { AcademyModel, AuditLogModel, UserModel, type AuthCtx } from '@sensei-hub/core-server'
 import { isValidCPF, hasMinRole } from '@sensei-hub/shared'
 import { type CreateGuardianInput, type CreateBeltRecordInput, type CreateAthleteInput, type UpdateAthleteInput } from '@dojo/shared'
 
@@ -23,6 +23,11 @@ export class AthleteService {
 
     if (athleteFields.cpf && !isValidCPF(athleteFields.cpf)) {
       throw new AthleteServiceError('Invalid CPF', 400)
+    }
+
+    if (athleteFields.userId) {
+      const user = await UserModel.findOne({ _id: athleteFields.userId, academyId: ctx.academyId, role: 'athlete', active: true })
+      if (!user) throw new AthleteServiceError('Linked athlete user not found', 400)
     }
 
     if (isMinor(athleteFields.birthDate) && !guardian) {
@@ -54,6 +59,7 @@ export class AthleteService {
           [
             {
               academyId: ctx.academyId,
+              userId: athleteFields.userId,
               enrollmentNumber,
               fullName: athleteFields.fullName,
               preferredName: athleteFields.preferredName,
@@ -199,10 +205,15 @@ export class AthleteService {
       }
     }
 
+    if (data.userId !== undefined && data.userId !== athlete.userId?.toString()) {
+      const user = await UserModel.findOne({ _id: data.userId, academyId: ctx.academyId, role: 'athlete', active: true })
+      if (!user) throw new AthleteServiceError('Linked athlete user not found', 400)
+    }
+
     const auditEntries: Array<{ fieldName: string; oldValue: unknown; newValue: unknown }> = []
 
     const simpleFields = [
-      'fullName', 'preferredName', 'gender', 'birthDate', 'nationality', 'email',
+      'userId', 'fullName', 'preferredName', 'gender', 'birthDate', 'nationality', 'email',
       'phone', 'cpf', 'currentBelt', 'federationNumber', 'zempoNumber', 'clubName', 'hasMedicalRestriction',
       'termsAccepted', 'imageAuthorizationAccepted',
     ] as const
@@ -373,6 +384,7 @@ export class AthleteService {
     return {
       id: athlete._id.toString(),
       academyId: athlete.academyId.toString(),
+      userId: athlete.userId?.toString(),
       status: athlete.status,
       enrollmentNumber: athlete.enrollmentNumber,
       fullName: athlete.fullName,

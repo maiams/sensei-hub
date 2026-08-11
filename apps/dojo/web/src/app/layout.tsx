@@ -4,8 +4,9 @@ import { AppHeader } from '../components/AppHeader'
 
 export const metadata: Metadata = {
   title: 'Sensei Dojô',
-  description: 'Gestão de academia de judô — atletas, faixas e acompanhamento',
+  description: 'Turmas, aulas e presença da sua academia de judô',
   icons: { icon: '/icon.svg', apple: '/icon.svg' },
+  manifest: '/manifest.json',
 }
 
 export const viewport: Viewport = {

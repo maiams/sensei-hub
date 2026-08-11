@@ -2,16 +2,7 @@ import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
 import process from 'node:process'
 
-const SUPPORTED_PLATFORM = 'darwin'
 const SHUTDOWN_TIMEOUT_MS = 5_000
-
-if (process.platform !== SUPPORTED_PLATFORM) {
-  console.error(
-    `[dev:run] Sistema operacional ainda nao suportado: ${process.platform}. ` +
-      'Por enquanto, este comando funciona apenas no macOS.',
-  )
-  process.exit(1)
-}
 
 // Qual produto subir: `pnpm dev:run [dojo|arena]` (default: arena).
 const product = process.argv[2] === 'dojo' ? 'dojo' : 'arena'
@@ -40,7 +31,11 @@ function killProcessGroup(child, signal) {
   if (child.pid === undefined) return
 
   try {
-    process.kill(-child.pid, signal)
+    if (process.platform === 'win32') {
+      child.kill(signal)
+    } else {
+      process.kill(-child.pid, signal)
+    }
   } catch (error) {
     if (error.code !== 'ESRCH') {
       console.error(`[dev:run] Falha ao encerrar ${child.spawnargs.join(' ')}:`, error)
@@ -63,18 +58,63 @@ async function stopChildProcesses() {
   }
 }
 
+function processIsRunning(child) {
+  if (child?.pid === undefined) return false
+  if (child.exitCode !== null || child.signalCode !== null) return false
+
+  try {
+    process.kill(child.pid, 0)
+    return true
+  } catch (error) {
+    if (error.code === 'ESRCH') return false
+    return true
+  }
+}
+
+function clearExitedMongodReferences() {
+  for (const server of replicaSet.servers) {
+    const instance = server.instanceInfo?.instance
+    if (instance?.mongodProcess && !processIsRunning(instance.mongodProcess)) {
+      instance.mongodProcess = undefined
+    }
+  }
+}
+
+async function stopReplicaSet() {
+  if (replicaSet === undefined) return
+
+  // A process can still disappear outside the runner (for example, after an
+  // interrupted startup). mongodb-memory-server 11 keeps that stale reference
+  // and rejects cleanup, so discard only a ChildProcess known to have exited.
+  clearExitedMongodReferences()
+
+  await replicaSet.stop({ doCleanup: false })
+  clearExitedMongodReferences()
+  await replicaSet.cleanup({ doCleanup: true, force: false })
+}
+
 async function shutdown(exitCode = 0) {
   if (shuttingDown) return
   shuttingDown = true
 
   console.log('\n[dev:run] Encerrando web, servidor e MongoDB...')
-  await stopChildProcesses()
+  let finalExitCode = exitCode
 
-  if (replicaSet !== undefined) {
-    await replicaSet.stop()
+  try {
+    await stopChildProcesses()
+  } catch (error) {
+    console.error('[dev:run] Falha ao encerrar os processos da aplicacao:', error)
+    finalExitCode = 1
   }
 
-  process.exit(exitCode)
+  try {
+    await stopReplicaSet()
+  } catch (error) {
+    console.error('[dev:run] Falha ao encerrar o MongoDB efemero:', error)
+    finalExitCode = 1
+  }
+
+  process.exit(finalExitCode)
 }
 
 function startPackage(name, filter, environment = {}) {
@@ -109,7 +149,10 @@ for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
 try {
   console.log('[dev:run] Iniciando MongoDB efemero em replica set...')
   replicaSet = await MongoMemoryReplSet.create({
-    replSet: { count: 1, storageEngine: 'wiredTiger' },
+    // Keep mongod out of this runner's foreground process group. Ctrl+C then
+    // reaches only the runner, which lets mongodb-memory-server perform its
+    // graceful shutdown instead of racing an already-signalled mongod.
+    replSet: { count: 1, storageEngine: 'wiredTiger', spawn: { detached: true } },
   })
 
   const mongodbUri = replicaSet.getUri('senseihub-dev')
